@@ -8,6 +8,7 @@ import httpx
 
 from oce.api.router import get_application
 from oce.application.service import BatchUploadResult, RetrievalResult
+from oce.auth import verify_api_key
 from oce.domain.services.search import SearchHit
 from oce.main import app
 
@@ -69,8 +70,16 @@ class StubApplication:
         )
 
 
+async def mock_verify_api_key(authorization: str | None = None) -> str:
+    """测试用模拟认证，接受任何格式正确的 Bearer token。"""
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ")
+    return "test-token"
+
+
 def _transport() -> httpx.ASGITransport:
     app.dependency_overrides[get_application] = lambda: StubApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
     return httpx.ASGITransport(app=app)
 
 
@@ -147,6 +156,7 @@ async def test_paths_endpoint_deduplicates_chunks_by_path():
             return RetrievalResult((first, second), "formatted", 12)
 
     app.dependency_overrides[get_application] = lambda: DuplicateApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/agents/codebase-retrieval-paths",

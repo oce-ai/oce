@@ -208,7 +208,9 @@ class PathIndexClient:
         """删除指定 blob 的路径文档"""
         await self.initialize()
         
-        expr = f"blob_name in [{', '.join(f'"{name}"' for name in blob_names)}]"
+        # 嵌套 f-string 复用引号在 Python <3.12 解析器下报错，先拼好列表字面量再整体格式化。
+        quoted = ", ".join(f'"{name}"' for name in blob_names)
+        expr = f"blob_name in [{quoted}]"
         self.collection.delete(expr)
         logger.info(f"Deleted path documents for {len(blob_names)} blobs")
 

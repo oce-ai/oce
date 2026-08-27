@@ -70,12 +70,16 @@ oce init                    # 生成 ~/.oce/data/.env
 oce serve                   # http://127.0.0.1:8986
 ```
 
-`oce serve` 会自动准备好 SQLite、内嵌 Milvus Lite 文件和一个关闭的后台 worker，因此
-`oce init` 只暴露你真正要填的少量 key。生成的 `.env` 放在 data 目录，每次启动自动加载。常用参数：
+`oce serve` 启动时会自动执行数据库迁移（Alembic），然后准备好 SQLite、内嵌 Milvus Lite
+文件和一个关闭的后台 worker，因此 `oce init` 只暴露你真正要填的少量 key。生成的 `.env`
+放在 data 目录，每次启动自动加载。常用参数：
 
 - `--data-dir <path>` —— 数据库、向量文件和 `.env` 的存放位置（默认 `~/.oce/data`）
 - `--env-file <path>` —— 改为加载指定的 `.env`（优先级最高）
 - `--port <n>` / `--host <addr>` —— 监听地址（默认 `127.0.0.1:8986`）
+
+`oce version`（或 `oce --version`）打印当前版本；`oce -v serve` 把日志级别提到 INFO，
+`-vv` 提到 DEBUG（默认 WARNING，让检索管线的 info 日志保持安静）。
 
 想临时试跑而不安装：`uvx --from opencontextengine oce serve`。
 

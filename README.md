@@ -73,13 +73,18 @@ oce init                    # writes ~/.oce/data/.env
 oce serve                   # http://127.0.0.1:8986
 ```
 
-`oce serve` provisions SQLite, the embedded Milvus Lite file, and a disabled background
-worker automatically, so `oce init` only exposes the few keys you actually set. The
-generated `.env` lives in the data directory and is loaded on every start. Useful flags:
+`oce serve` runs the database migrations (Alembic) on startup, then provisions SQLite,
+the embedded Milvus Lite file, and a disabled background worker automatically, so
+`oce init` only exposes the few keys you actually set. The generated `.env` lives in
+the data directory and is loaded on every start. Useful flags:
 
 - `--data-dir <path>` — where the database, vector file, and `.env` live (default `~/.oce/data`)
 - `--env-file <path>` — load a specific `.env` instead (highest priority)
 - `--port <n>` / `--host <addr>` — bind address (default `127.0.0.1:8986`)
+
+`oce version` (or `oce --version`) prints the current version. `oce -v serve` raises the
+log level to INFO and `-vv` to DEBUG; the default WARNING keeps retrieval-path info logs
+quiet.
 
 For a throwaway run without installing: `uvx --from opencontextengine oce serve`.
 

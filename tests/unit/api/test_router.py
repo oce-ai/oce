@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from fastapi import Header
 import httpx
 
 from oce.api.router import get_application
 from oce.application.service import BatchUploadResult, RetrievalResult
-from oce.auth import verify_api_key
+from oce.auth import _unauthorized, verify_api_key
 from oce.domain.services.search import SearchHit
 from oce.main import app
 
@@ -70,11 +71,13 @@ class StubApplication:
         )
 
 
-async def mock_verify_api_key(authorization: str | None = None) -> str:
-    """测试用模拟认证，接受任何格式正确的 Bearer token。"""
-    if authorization and authorization.startswith("Bearer "):
-        return authorization.removeprefix("Bearer ")
-    return "test-token"
+async def mock_verify_api_key(authorization: str | None = Header(default=None)) -> str:
+    """测试用模拟认证：接受任何 Bearer token，无 token 或格式错误则拒绝。"""
+    if authorization is None:
+        raise _unauthorized("You didn't provide an API key.")
+    if not authorization.startswith("Bearer "):
+        raise _unauthorized("Invalid API key format. Expected 'Bearer <key>'")
+    return authorization.removeprefix("Bearer ")
 
 
 def _transport() -> httpx.ASGITransport:

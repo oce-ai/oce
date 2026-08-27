@@ -1,0 +1,152 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-dev
+    environment:
+      POSTGRES_DB: oce
+      POSTGRES_USER: oce
+      POSTGRES_PASSWORD: 5T5f32Nd2uK0tmtUPd7R
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U oce -d oce" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shared-network
+    restart: unless-stopped
+    ports:
+      - "25432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-dev
+    command: redis-server --appendonly yes --requirepass Wo5DNKyDKoqviWnxXcDh
+    volumes:
+      - redis_data_dev:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "Wo5DNKyDKoqviWnxXcDh", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - shared-network
+    restart: unless-stopped
+    ports:
+      - "26379:6379"
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: milvus-etcd-dev
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data_dev:/etcd
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "etcdctl",
+          "endpoint",
+          "health"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - shared-network
+    restart: unless-stopped
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: milvus-minio-dev
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data_dev:/minio_data
+    command:
+      - minio
+      - server
+      - /minio_data
+      - --console-address
+      - ":9001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mc",
+          "ready",
+          "local"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - shared-network
+    restart: unless-stopped
+  standalone:
+    image: milvusdb/milvus:v3.0.0
+    container_name: milvus-standalone-dev
+    command:
+      - milvus
+      - run
+      - standalone
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_REGION: us-east-1
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus_data_dev:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:9091/healthz"
+        ]
+      interval: 30s
+      timeout: 20s
+      start_period: 90s
+      retries: 3
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - shared-network
+    restart: unless-stopped
+
+networks:
+  shared-network:
+    driver: bridge
+
+
+volumes:
+  postgres_data_dev:
+    driver: local
+  redis_data_dev:
+    driver: local
+  etcd_data_dev:
+    driver: local
+  minio_data_dev:
+    driver: local
+  milvus_data_dev:
+    driver: local

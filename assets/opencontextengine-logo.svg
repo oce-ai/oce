@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="220" viewBox="0 0 900 220" role="img" aria-labelledby="title desc">
+  <title id="title">OpenContextEngine</title>
+  <desc id="desc">An open code bracket enclosing layered context lines and a retrieval marker.</desc>
+
+  <rect x="12" y="12" width="196" height="196" rx="46" fill="#0B1220"/>
+
+  <!-- The paired brackets suggest source code; the layered lines suggest context. -->
+  <path d="M84 48H69c-14 0-25 11-25 25v74c0 14 11 25 25 25h15"
+        fill="none" stroke="#19B7B5" stroke-width="15" stroke-linecap="round"/>
+  <path d="M136 48h15c14 0 25 11 25 25v74c0 14-11 25-25 25h-15"
+        fill="none" stroke="#FF806B" stroke-width="15" stroke-linecap="round"/>
+  <path d="M77 81h63M77 99h47M77 117h32"
+        fill="none" stroke="#F7FAFC" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="148" cy="117" r="7" fill="#FF806B"/>
+
+  <text x="252" y="126" fill="#0B1220"
+        font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif"
+        font-size="58" font-weight="700" letter-spacing="0.2">OpenContextEngine</text>
+  <path d="M255 158h104" stroke="#19B7B5" stroke-width="7" stroke-linecap="round"/>
+  <path d="M369 158h52" stroke="#FF806B" stroke-width="7" stroke-linecap="round"/>
+</svg>

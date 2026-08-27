@@ -1,0 +1,107 @@
+[project]
+name = "opencontextengine"
+version = "0.1.0"
+description = "Open-source codebase context engine for AI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "OpenContextEngine Contributors"}]
+keywords = ["code", "retrieval", "embedding", "context", "ai", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "asyncpg>=0.29.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",
+    "pydantic>=2.4.0",
+    "pydantic-settings>=2.0.0",
+    "openai>=1.3.0",
+    "httpx>=0.25.0",
+    "loguru>=0.7.0",
+    "python-dotenv>=1.0.0",
+    # Redis（任务队列）
+    "redis>=5.0.0",
+    # Milvus 3.0（向量数据库）
+    "pymilvus>=3.0.0",
+    # 本地个人模式的嵌入式 Milvus Lite
+    "milvus-lite>=2.4.0",
+    # AST 解析（cAST 切块）
+    "tree-sitter==0.25.2", # 0.26 在 Windows 深层遍历时会触发 native access violation
+    "tree-sitter-language-pack>=0.1.0",
+    "pyrsistent>=0.19.0",
+    "numpy>=1.24.0",
+    # SQLite 异步支持（测试用）
+    "aiosqlite>=0.19.0",
+    "langchain-text-splitters>=1.1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/oce-ai/oce"
+Repository = "https://github.com/oce-ai/oce"
+Documentation = "https://github.com/oce-ai/oce/blob/master/README.md"
+Issues = "https://github.com/oce-ai/oce/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "pytest-env>=1.1.0",
+    "freezegun>=1.4.0",
+    "faker>=22.0.0",
+]
+
+[project.scripts]
+oce = "oce.cli:main"
+
+[build-system]
+# setuptools>=77 支持 PEP 639 的 license 字符串写法与 license-files
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["oce*"]
+
+# ==================== Pytest 配置 ====================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+# 测试环境默认使用 SQLite 内存数据库
+env = [
+    "DB_URL=sqlite+aiosqlite:///:memory:",
+]
+addopts = [
+    "-ra",
+    "-m", "not integration",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+]
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (database, redis, etc.)",
+    "slow: Slow tests (performance, large data)",
+    "skip_ci: Skip in CI environment",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

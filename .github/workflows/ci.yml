@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# 同一分支/PR 的新提交取消仍在跑的旧运行，省额度。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小权限：CI 只需读代码。
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 = pyproject 声明的下限；3.13 = 实际开发版本。两端各测一次。
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv + Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # --locked：锁文件与 pyproject 不一致时直接失败，强制贡献者同步 uv.lock。
+      - name: Install dependencies (locked)
+        run: uv sync --extra dev --locked
+
+      # 导入期不连库（engine 惰性），显式用 SQLite 双保险，纯粹校验模块可加载。
+      - name: Smoke import
+        env:
+          DB_URL: "sqlite+aiosqlite:///:memory:"
+        run: uv run python -c "from oce.main import app; print('import OK')"
+
+      # 关键约束：每个测试文件独立进程运行。tree-sitter 语言包 + Milvus Lite
+      # 在同一进程累积会吃掉 10GB+ 内存，禁止一次性跑整个 tests/unit/infrastructure。
+      # 循环内不用 set -e，让所有文件都跑完再统一以非零码退出，便于一次看到全部失败。
+      - name: Run unit tests (one process per file)
+        shell: bash
+        run: |
+          set -uo pipefail
+          failed=0
+          while IFS= read -r -d '' file; do
+            echo "::group::pytest ${file}"
+            if ! uv run pytest "${file}" -q; then
+              failed=1
+              echo "::error file=${file}::unit tests failed"
+            fi
+            echo "::endgroup::"
+          done < <(find tests/unit -name 'test_*.py' -print0 | sort -z)
+          exit "${failed}"
+
+  build:
+    name: build (packaging)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv + Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      # 校验 setuptools 打包配置能产出 sdist + wheel。
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+

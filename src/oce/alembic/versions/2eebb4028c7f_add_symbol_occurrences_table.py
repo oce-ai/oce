@@ -21,14 +21,16 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         'symbol_occurrences',
-        sa.Column('id', sa.BigInteger(), nullable=False),
+        # SQLite 下用 INTEGER 主键才能自增（rowid alias），与 models.py 保持一致
+        sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), autoincrement=True, nullable=False),
         sa.Column('identifier', sa.String(length=256), nullable=False),
         sa.Column('blob_name', sa.String(length=64), nullable=False),
         sa.Column('content_hash', sa.String(length=64), nullable=False),
         sa.Column('kind', sa.String(length=16), nullable=False),
         sa.Column('start_line', sa.Integer(), nullable=False),
         sa.Column('end_line', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        # func.now() 在 SQLite 方言下编译为 CURRENT_TIMESTAMP，text('now()') 会直接照搬到 SQL 导致插入失败
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(['blob_name'], ['blobs.blob_name'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['content_hash'], ['chunks.content_hash'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),

@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from oce import __version__
+
 
 _DEFAULT_DATA_DIR = Path.home() / ".oce" / "data"
+
+# -v 次数 → loguru / uvicorn 级别；默认 WARNING 避免检索管线 info 日志刷屏
+_LOG_LEVELS = ("WARNING", "INFO", "DEBUG")
+
+
+def _verbose_level(verbose: int) -> int:
+    return min(max(verbose, 0), len(_LOG_LEVELS) - 1)
+
+
+def _configure_logging(verbose: int) -> None:
+    """按 -v 次数配置 loguru；替换默认 stderr handler，只影响 OCE 内部日志。"""
+    from loguru import logger
+
+    logger.remove()
+    logger.add(sys.stderr, level=_LOG_LEVELS[_verbose_level(verbose)])
 
 
 _PERSONAL_ENV_TEMPLATE = """\
@@ -54,15 +70,6 @@ def _local_defaults(data_dir: Path) -> dict[str, str]:
     }
 
 
-async def _initialize_local_database() -> None:
-    from oce.infrastructure.persistence import models  # noqa: F401
-    from oce.shared.database.session import Base, engine
-
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    await engine.dispose()
-
-
 def _load_personal_env(data_dir: Path, env_file: str | None) -> None:
     """在读取 settings 前把个人模式 .env 灌进 os.environ。
 
@@ -99,7 +106,12 @@ def _serve(args: argparse.Namespace) -> None:
     for key, value in _local_defaults(data_dir).items():
         os.environ.setdefault(key, value)
 
-    asyncio.run(_initialize_local_database())
+    # 个人模式每次启动自动迁移（SQLite 文件可直接幂等升级）
+    from oce.infrastructure.persistence.migrations import run_migrations
+
+    run_migrations(os.environ["DB_URL"])
+
+    print(f"oce serving on http://{args.host}:{args.port} (data dir: {data_dir})")
 
     import uvicorn
 
@@ -108,11 +120,25 @@ def _serve(args: argparse.Namespace) -> None:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        log_level=_LOG_LEVELS[_verbose_level(args.verbose)].lower(),
     )
+
+
+def _version(args: argparse.Namespace) -> None:
+    print(f"oce {__version__}")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="oce", description="OpenContextEngine CLI")
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="increase log verbosity: -v info, -vv debug",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     serve = subparsers.add_parser("serve", help="Start the local OCE API")
@@ -136,11 +162,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init.set_defaults(handler=_init)
 
+    version = subparsers.add_parser("version", help="Print the oce version")
+    version.set_defaults(handler=_version)
+
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
+    _configure_logging(args.verbose)
     args.handler(args)
 
 

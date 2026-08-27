@@ -75,6 +75,10 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["oce*"]
 
+[tool.setuptools.package-data]
+# alembic 模板只在 wheel 中存在时，个人模式 oce serve 才能离线跑迁移
+"oce.alembic" = ["script.py.mako"]
+
 # ==================== Pytest 配置 ====================
 [tool.pytest.ini_options]
 minversion = "8.0"

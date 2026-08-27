@@ -1,4 +1,4 @@
-﻿"""initial schema
+"""initial schema
 
 Revision ID: d48cee59fb24
 Revises: 

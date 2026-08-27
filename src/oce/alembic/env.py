@@ -1,4 +1,9 @@
-"""Alembic async migration environment."""
+"""Alembic async migration environment.
+
+LOCATION NOTE: this file lives inside the ``oce`` package (``src/oce/alembic/``)
+so that ``uv tool install`` wheels carry the migration scripts; ``oce serve``
+runs ``alembic upgrade head`` programmatically without a repository checkout.
+"""
 
 from __future__ import annotations
 

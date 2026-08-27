@@ -23,8 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.10 = pyproject 声明的下限；3.13 = 实际开发版本。两端各测一次。
-        python-version: ["3.10", "3.13"]
+        # 3.11 = pyproject 声明的下限（StrEnum）；3.13 = 实际开发版本。两端各测一次。
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
 

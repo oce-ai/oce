@@ -11,7 +11,7 @@ dense + exact + path 混合召回 · cAST 语义切块 · LLM 重排 · 覆盖�
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Milvus](https://img.shields.io/badge/Vectors-Milvus%203.0-00A1EA.svg)](https://milvus.io/)
@@ -53,7 +53,7 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 
 ## 环境要求
 
-- Python 3.10 及以上
+- Python 3.11 及以上
 - [uv](https://docs.astral.sh/uv/)
 
 个人模式无需其它依赖：元数据落在 SQLite，向量落在内嵌的 Milvus Lite 文件。服务模式额外

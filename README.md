@@ -11,7 +11,7 @@ Hybrid dense + exact + path recall · cAST-aware chunking · LLM reranking · co
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Milvus](https://img.shields.io/badge/Vectors-Milvus%203.0-00A1EA.svg)](https://milvus.io/)
@@ -55,7 +55,7 @@ Milvus Lite, background worker disabled) for a single machine, and a **service m
 
 ## Requirements
 
-- Python 3.10 or newer
+- Python 3.11 or newer
 - [uv](https://docs.astral.sh/uv/)
 
 Personal mode needs nothing else: metadata lives in SQLite and vectors in an embedded

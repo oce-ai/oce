@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from oce.api.middleware import ApiCallMetricsMiddleware
 from oce.api.router import router
 from oce.application.container import get_container
 from oce.shared.config.settings import get_settings
@@ -46,6 +47,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(router)
+
+
+def _metrics_sink_provider():
+    """仅在容器已装配后返回 sink；未装配（如未跑 lifespan）时返回 None 跳过，避免误构建容器。"""
+    if get_container.cache_info().currsize == 0:
+        return None
+    return get_container().metrics
+
+
+if get_settings().monitoring.enabled:
+    app.add_middleware(ApiCallMetricsMiddleware, sink_provider=_metrics_sink_provider)
 
 
 @app.get("/health", tags=["Meta"])

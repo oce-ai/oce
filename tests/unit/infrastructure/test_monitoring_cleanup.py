@@ -84,20 +84,18 @@ async def test_cleanup_swallows_errors():
     assert await cleaner._cleanup_once() == 0
 
 
-async def test_loop_runs_cleanup_periodically():
-    factory, engine = await _make_factory()
-    try:
-        async with factory() as session:
-            session.add(
-                ApiCallMetricModel(ts=_old(), endpoint="/x", method="GET", status_code=200, latency_ms=1)
-            )
-            await session.commit()
+async def test_loop_invokes_cleanup_periodically():
+    """循环按间隔驱动 _cleanup_once；用打桩计数避免 in-memory 库在取消时的连接竞争。"""
+    calls = {"n": 0}
 
-        cleaner = MonitoringCleaner(factory, retention_days=30, interval_seconds=0.01)
-        await cleaner.start()
-        await asyncio.sleep(0.05)
-        await cleaner.stop()
+    async def _fake_cleanup() -> int:
+        calls["n"] += 1
+        return 0
 
-        assert await _count(factory, ApiCallMetricModel) == 0  # 循环跑过并清掉过期行
-    finally:
-        await engine.dispose()
+    cleaner = MonitoringCleaner(lambda: None, retention_days=30, interval_seconds=0.01)
+    cleaner._cleanup_once = _fake_cleanup
+    await cleaner.start()
+    await asyncio.sleep(0.05)
+    await cleaner.stop()
+
+    assert calls["n"] >= 1

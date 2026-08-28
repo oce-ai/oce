@@ -32,6 +32,10 @@ from oce.application.commands.requeue import (
     RequeueStaleCommandHandler,
 )
 from oce.application.queries.search import SearchQuery, SearchQueryHandler
+from oce.application.queries.stats import (
+    MonitoringStatsQuery,
+    MonitoringStatsQueryHandler,
+)
 from oce.application.queries.status import (
     BlobStatusQuery,
     BlobStatusQueryHandler,
@@ -58,6 +62,7 @@ from oce.infrastructure.metrics.resource_sampler import (
     build_psutil_collector,
 )
 from oce.infrastructure.metrics.sql_metrics_sink import SqlMetricsSink
+from oce.infrastructure.metrics.stats_store import SqlMonitoringStatsReader
 from oce.infrastructure.queue.redis_queue import RedisQueue
 from oce.shared.config import get_settings
 from oce.shared.database.session import async_session_factory
@@ -359,6 +364,12 @@ class Container:
         query_bus.register(
             OverviewContextQuery,
             OverviewContextQueryHandler(self._uow_factory),
+        )
+        query_bus.register(
+            MonitoringStatsQuery,
+            MonitoringStatsQueryHandler(
+                SqlMonitoringStatsReader(async_session_factory)
+            ),
         )
 
         self.command_bus = command_bus

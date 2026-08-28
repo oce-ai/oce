@@ -17,6 +17,13 @@ from oce.shared.errors import (
     NeedsResetError,
     ScopeRequiredError,
 )
+from oce.shared.metrics_read import (
+    ApiCallStats,
+    MonitoringStats,
+    ResourceSnapshot,
+    RetrievalStats,
+    TokenKindStats,
+)
 
 
 class StubApplication:
@@ -73,6 +80,27 @@ class StubApplication:
             working_set_paths=("README.md", "src/main.py"),
             working_set_paths_total=2,
             elapsed_ms=15,
+        )
+
+    async def monitoring_stats(self, *, window_hours: int = 24):
+        return MonitoringStats(
+            window_hours=window_hours,
+            api_calls=ApiCallStats(
+                count=3, error_count=1, avg_latency_ms=12.5,
+                p50_latency_ms=10, p95_latency_ms=30, max_latency_ms=30,
+            ),
+            tokens=(
+                TokenKindStats(
+                    kind="embed", calls=2, prompt_tokens=100,
+                    completion_tokens=0, total_tokens=100,
+                ),
+            ),
+            tokens_total=100,
+            retrieval=RetrievalStats(count=4, empty_count=1, empty_rate=0.25),
+            resource=ResourceSnapshot(
+                ts=None, mem_rss_bytes=1, mem_percent=2.0, cpu_percent=3.0,
+                disk_free_bytes=4, disk_total_bytes=5, disk_data_bytes=6,
+            ),
         )
 
 
@@ -367,3 +395,25 @@ async def test_project_overview_contract():
         "working_set_paths_total": 2,
         "codebase_retrieval_elapsed_ms": 15,
     }
+
+
+async def test_admin_stats_contract():
+    async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
+        response = await client.get(
+            "/admin/stats?window_hours=12",
+            headers={"Authorization": "Bearer sk-dev"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window_hours"] == 12
+    assert body["api_calls"]["p95_latency_ms"] == 30
+    assert body["tokens"][0]["kind"] == "embed"
+    assert body["tokens_total"] == 100
+    assert body["retrieval"]["empty_rate"] == 0.25
+    assert body["resource"]["disk_total_bytes"] == 5
+
+
+async def test_admin_stats_requires_auth():
+    async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
+        response = await client.get("/admin/stats")
+    assert response.status_code == 401

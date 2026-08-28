@@ -19,6 +19,7 @@ from oce.application.commands.ingest import (
     IngestBlobsCommand,
 )
 from oce.application.queries.search import SearchQuery
+from oce.application.queries.stats import MonitoringStatsQuery
 from oce.application.queries.status import (
     BlobStatusQuery,
     BlobStatusResult,
@@ -32,6 +33,7 @@ from oce.application.queries.status import (
 from oce.domain.services.formatter import format_retrieval
 from oce.domain.services.search import SearchHit
 from oce.shared.errors import ServiceNotReadyError
+from oce.shared.metrics_read import MonitoringStats
 
 
 _OVERVIEW_QUERIES = (
@@ -240,3 +242,6 @@ class RetrievalApplication:
         return await self._queries.ask(
             BlobStatusQuery(tuple(blob_names), checkpoint_id)
         )
+
+    async def monitoring_stats(self, *, window_hours: int = 24) -> MonitoringStats:
+        return await self._queries.ask(MonitoringStatsQuery(window_hours))

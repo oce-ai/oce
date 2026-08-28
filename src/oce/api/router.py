@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from oce.api.schemas import (
+    ApiCallStatsResponse,
     BatchUploadRequest,
     BatchUploadResponse,
     BlobStatusRequest,
@@ -17,10 +18,14 @@ from oce.api.schemas import (
     FindMissingRequest,
     FindMissingResponse,
     KeyDocSection,
+    MonitoringStatsResponse,
     ProjectOverviewRequest,
     ProjectOverviewResponse,
     ProjectOverviewSection,
     ReloadCredentialsResponse,
+    ResourceSnapshotResponse,
+    RetrievalStatsResponse,
+    TokenKindStatsResponse,
 )
 from oce.application.container import get_container
 from oce.application.service import BlobUpload, RetrievalApplication
@@ -215,4 +220,52 @@ async def project_overview(
         working_set_paths=list(result.working_set_paths),
         working_set_paths_total=result.working_set_paths_total,
         codebase_retrieval_elapsed_ms=result.elapsed_ms,
+    )
+
+
+@router.get("/admin/stats", response_model=MonitoringStatsResponse)
+async def admin_stats(
+    window_hours: int = 24,
+    application: RetrievalApplication = Depends(get_application),
+) -> MonitoringStatsResponse:
+    stats = await application.monitoring_stats(window_hours=window_hours)
+    return MonitoringStatsResponse(
+        window_hours=stats.window_hours,
+        api_calls=ApiCallStatsResponse(
+            count=stats.api_calls.count,
+            error_count=stats.api_calls.error_count,
+            avg_latency_ms=stats.api_calls.avg_latency_ms,
+            p50_latency_ms=stats.api_calls.p50_latency_ms,
+            p95_latency_ms=stats.api_calls.p95_latency_ms,
+            max_latency_ms=stats.api_calls.max_latency_ms,
+        ),
+        tokens=[
+            TokenKindStatsResponse(
+                kind=token.kind,
+                calls=token.calls,
+                prompt_tokens=token.prompt_tokens,
+                completion_tokens=token.completion_tokens,
+                total_tokens=token.total_tokens,
+            )
+            for token in stats.tokens
+        ],
+        tokens_total=stats.tokens_total,
+        retrieval=RetrievalStatsResponse(
+            count=stats.retrieval.count,
+            empty_count=stats.retrieval.empty_count,
+            empty_rate=stats.retrieval.empty_rate,
+        ),
+        resource=(
+            ResourceSnapshotResponse(
+                ts=stats.resource.ts,
+                mem_rss_bytes=stats.resource.mem_rss_bytes,
+                mem_percent=stats.resource.mem_percent,
+                cpu_percent=stats.resource.cpu_percent,
+                disk_free_bytes=stats.resource.disk_free_bytes,
+                disk_total_bytes=stats.resource.disk_total_bytes,
+                disk_data_bytes=stats.resource.disk_data_bytes,
+            )
+            if stats.resource is not None
+            else None
+        ),
     )

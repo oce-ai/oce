@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import time
 from dataclasses import dataclass
@@ -18,6 +17,20 @@ from oce.application.commands.ingest import (
     IngestBlobCommand,
     IngestBlobsCommand,
 )
+from oce.application.commands.gc import GcCommand, GcResult
+from oce.application.commands.queue_admin import ResetQueueCommand, ResetQueueResult
+from oce.application.commands.requeue import RequeueStaleCommand, RequeueStaleResult
+from oce.application.credential_admin import (
+    CreateCredentialCommand,
+    CredentialCreate,
+    CredentialRecord,
+    CredentialUpdate,
+    DeleteCredentialCommand,
+    DuplicateCredentialCommand,
+    ListCredentialsQuery,
+    UpdateCredentialCommand,
+)
+from oce.application.queries.queue import QueueStatusQuery, QueueStatusResult
 from oce.application.queries.search import SearchQuery
 from oce.application.queries.stats import MonitoringStatsQuery
 from oce.application.queries.status import (
@@ -25,28 +38,12 @@ from oce.application.queries.status import (
     BlobStatusResult,
     FindMissingQuery,
     FindMissingResult,
-    KeyDocResult,
-    OverviewContextQuery,
     ResolveScopeQuery,
     ResolveScopeResult,
 )
 from oce.domain.services.formatter import format_retrieval
 from oce.domain.services.search import SearchHit
-from oce.shared.errors import ServiceNotReadyError
 from oce.shared.metrics_read import MonitoringStats
-
-
-_OVERVIEW_QUERIES = (
-    "Where are the main application entry points and startup lifecycle implemented?",
-    "What are the core abstractions and module boundaries?",
-    "Where are the public APIs, protocols, and schemas defined?",
-    "How are errors, logging, and observability handled?",
-)
-_DEEP_OVERVIEW_QUERIES = (
-    "How is the project built, configured, and deployed?",
-    "How are concurrency, queues, and background work coordinated?",
-    "Where are the most important integration and end-to-end tests?",
-)
 
 
 def compute_blob_name(path: str, content: str) -> str:
@@ -71,22 +68,6 @@ class BatchUploadResult:
 class RetrievalResult:
     hits: tuple[SearchHit, ...]
     formatted_retrieval: str
-    elapsed_ms: int
-
-
-@dataclass(frozen=True)
-class ProjectOverviewSection:
-    query: str
-    formatted_retrieval: str = ""
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class ProjectOverviewResult:
-    key_docs: tuple[KeyDocResult, ...]
-    sections: tuple[ProjectOverviewSection, ...]
-    working_set_paths: tuple[str, ...]
-    working_set_paths_total: int
     elapsed_ms: int
 
 
@@ -162,50 +143,6 @@ class RetrievalApplication:
             elapsed_ms=elapsed_ms,
         )
 
-    async def project_overview(
-        self,
-        *,
-        depth: str,
-        checkpoint_id: str | None = None,
-        added_blobs: list[str] | None = None,
-        deleted_blobs: list[str] | None = None,
-    ) -> ProjectOverviewResult:
-        started = time.perf_counter()
-        added = tuple(added_blobs or ())
-        deleted = tuple(deleted_blobs or ())
-        scope = await self._prepare_scope(checkpoint_id, added, deleted)
-        queries = _OVERVIEW_QUERIES + (
-            _DEEP_OVERVIEW_QUERIES if depth == "deep" else ()
-        )
-
-        async def run(query: str) -> ProjectOverviewSection:
-            try:
-                result = await self._queries.ask(
-                    SearchQuery(query, scope.blob_names, source="overview")
-                )
-                return ProjectOverviewSection(
-                    query=query,
-                    formatted_retrieval=format_retrieval(result.hits),
-                )
-            except ServiceNotReadyError:
-                raise
-            except Exception as exc:
-                return ProjectOverviewSection(query=query, error=str(exc))
-
-        context, sections = await asyncio.gather(
-            self._queries.ask(
-                OverviewContextQuery(scope.blob_names)
-            ),
-            asyncio.gather(*(run(query) for query in queries)),
-        )
-        return ProjectOverviewResult(
-            key_docs=context.key_docs,
-            sections=tuple(sections),
-            working_set_paths=context.paths,
-            working_set_paths_total=context.paths_total,
-            elapsed_ms=int((time.perf_counter() - started) * 1000),
-        )
-
     async def _prepare_scope(
         self,
         checkpoint_id: str | None,
@@ -245,3 +182,46 @@ class RetrievalApplication:
 
     async def monitoring_stats(self, *, window_hours: int = 24) -> MonitoringStats:
         return await self._queries.ask(MonitoringStatsQuery(window_hours))
+
+    async def queue_status(self) -> QueueStatusResult:
+        return await self._queries.ask(QueueStatusQuery())
+
+    async def reset_queue(
+        self, *, mode: str = "sync", requeue: bool = True
+    ) -> ResetQueueResult:
+        return await self._commands.execute(ResetQueueCommand(mode, requeue))
+
+    async def requeue_stale(
+        self, *, stale_hours: int = 24, limit: int = 100
+    ) -> RequeueStaleResult:
+        return await self._commands.execute(
+            RequeueStaleCommand(stale_hours, limit)
+        )
+
+    async def run_gc(
+        self, *, ttl_days: int = 30, dry_run: bool = True, limit: int = 1000
+    ) -> GcResult:
+        return await self._commands.execute(GcCommand(ttl_days, dry_run, limit))
+
+    async def list_credentials(self) -> list[CredentialRecord]:
+        return await self._queries.ask(ListCredentialsQuery())
+
+    async def create_credential(self, data: CredentialCreate) -> CredentialRecord:
+        return await self._commands.execute(CreateCredentialCommand(data))
+
+    async def update_credential(
+        self, credential_id: int, changes: CredentialUpdate
+    ) -> CredentialRecord | None:
+        return await self._commands.execute(
+            UpdateCredentialCommand(credential_id, changes)
+        )
+
+    async def delete_credential(self, credential_id: int) -> bool:
+        return await self._commands.execute(DeleteCredentialCommand(credential_id))
+
+    async def duplicate_credential(
+        self, credential_id: int, *, name: str, api_key: str
+    ) -> CredentialRecord | None:
+        return await self._commands.execute(
+            DuplicateCredentialCommand(credential_id, name, api_key)
+        )

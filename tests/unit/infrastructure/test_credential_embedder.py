@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from oce.shared.database.session import Base
 from oce.infrastructure.embed.credential_embedder import CredentialConfiguredEmbedder
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
+from oce.infrastructure.persistence.models import EmbeddingCredentialModel
 from oce.shared.config.settings import EmbeddingSettings
 
 
@@ -19,27 +19,19 @@ async def _runtime():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def test_active_credential_overrides_provider_batch_defaults():
+async def test_active_credential_batch_settings_used():
     engine, sessions = await _runtime()
     async with sessions() as session:
-        provider = EmbeddingProviderModel(
-            code="siliconflow",
-            display_name="SiliconFlow",
-            embed_endpoint="https://example.test/v1/embeddings",
-            embed_model="embedding-model",
-            dimensions=1024,
-            max_batch_size=32,
-            max_batch_chars=32_000,
-        )
-        session.add(provider)
-        await session.flush()
         session.add(
             EmbeddingCredentialModel(
-                provider_id=provider.id,
+                provider="siliconflow",
                 name="primary",
                 api_key="database-key",
                 api_key_hash="hash",
                 priority=10,
+                embed_endpoint="https://example.test/v1/embeddings",
+                embed_model="embedding-model",
+                dimensions=1024,
                 max_batch_size=8,
                 max_batch_chars=24_000,
             )
@@ -132,21 +124,15 @@ async def test_credential_id_and_usage_callback_wired_through():
     """DB 凭证的 id 填入 config，并把 credential_id + on_usage 透传给底层 delegate。"""
     engine, sessions = await _runtime()
     async with sessions() as session:
-        provider = EmbeddingProviderModel(
-            code="siliconflow",
-            display_name="SiliconFlow",
-            embed_endpoint="https://example.test/v1/embeddings",
-            embed_model="embedding-model",
-            dimensions=1024,
-        )
-        session.add(provider)
-        await session.flush()
         credential = EmbeddingCredentialModel(
-            provider_id=provider.id,
+            provider="siliconflow",
             name="primary",
             api_key="database-key",
             api_key_hash="hash",
             priority=10,
+            embed_endpoint="https://example.test/v1/embeddings",
+            embed_model="embedding-model",
+            dimensions=1024,
         )
         session.add(credential)
         await session.commit()

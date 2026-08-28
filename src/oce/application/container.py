@@ -13,6 +13,7 @@ from oce.application.commands.credentials import (
     ReloadEmbeddingCredentialsCommand,
     ReloadEmbeddingCredentialsCommandHandler,
 )
+from oce.application.commands.gc import GcCommand, GcCommandHandler
 from oce.application.commands.ingest import (
     DeleteBlobsCommand,
     DeleteBlobsCommandHandler,
@@ -31,6 +32,22 @@ from oce.application.commands.requeue import (
     RequeueStaleCommand,
     RequeueStaleCommandHandler,
 )
+from oce.application.credential_admin import (
+    CreateCredentialCommand,
+    CreateCredentialCommandHandler,
+    DeleteCredentialCommand,
+    DeleteCredentialCommandHandler,
+    DuplicateCredentialCommand,
+    DuplicateCredentialCommandHandler,
+    ListCredentialsQuery,
+    ListCredentialsQueryHandler,
+    UpdateCredentialCommand,
+    UpdateCredentialCommandHandler,
+)
+from oce.application.queries.queue import (
+    QueueStatusQuery,
+    QueueStatusQueryHandler,
+)
 from oce.application.queries.search import SearchQuery, SearchQueryHandler
 from oce.application.queries.stats import (
     MonitoringStatsQuery,
@@ -41,8 +58,6 @@ from oce.application.queries.status import (
     BlobStatusQueryHandler,
     FindMissingQuery,
     FindMissingQueryHandler,
-    OverviewContextQuery,
-    OverviewContextQueryHandler,
     ResolveScopeQuery,
     ResolveScopeQueryHandler,
 )
@@ -54,6 +69,9 @@ from oce.infrastructure.embed.credential_embedder import CredentialConfiguredEmb
 from oce.infrastructure.embed.credential_reranker import CredentialConfiguredReranker
 from oce.infrastructure.milvus3 import Milvus3SearchStore
 from oce.infrastructure.milvus3.path_index import PathIndexClient
+from oce.infrastructure.persistence.credential_admin_store import (
+    SqlCredentialAdminStore,
+)
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
 from oce.infrastructure.metrics.cleanup import MonitoringCleaner
@@ -311,14 +329,12 @@ class Container:
                 blob_batch_size=32,
             ),
         )
-        command_bus.register(
-            DeleteBlobsCommand,
-            DeleteBlobsCommandHandler(
-                self._uow_factory,
-                self.search_store,
-                path_store=self.path_index,
-            ),
+        delete_blobs_handler = DeleteBlobsCommandHandler(
+            self._uow_factory,
+            self.search_store,
+            path_store=self.path_index,
         )
+        command_bus.register(DeleteBlobsCommand, delete_blobs_handler)
         command_bus.register(
             ReloadEmbeddingCredentialsCommand,
             ReloadEmbeddingCredentialsCommandHandler(credential_runtime),
@@ -334,6 +350,28 @@ class Container:
         command_bus.register(
             ResetQueueCommand,
             ResetQueueCommandHandler(self._uow_factory, self.queue),
+        )
+
+        credential_admin_store = SqlCredentialAdminStore(async_session_factory)
+        command_bus.register(
+            CreateCredentialCommand,
+            CreateCredentialCommandHandler(credential_admin_store),
+        )
+        command_bus.register(
+            UpdateCredentialCommand,
+            UpdateCredentialCommandHandler(credential_admin_store),
+        )
+        command_bus.register(
+            DeleteCredentialCommand,
+            DeleteCredentialCommandHandler(credential_admin_store),
+        )
+        command_bus.register(
+            DuplicateCredentialCommand,
+            DuplicateCredentialCommandHandler(credential_admin_store),
+        )
+        command_bus.register(
+            GcCommand,
+            GcCommandHandler(self._uow_factory, delete_blobs_handler, self.queue),
         )
 
         query_bus = QueryBus()
@@ -362,14 +400,18 @@ class Container:
         query_bus.register(BlobStatusQuery, BlobStatusQueryHandler(self._uow_factory))
         query_bus.register(ResolveScopeQuery, ResolveScopeQueryHandler(self._uow_factory))
         query_bus.register(
-            OverviewContextQuery,
-            OverviewContextQueryHandler(self._uow_factory),
-        )
-        query_bus.register(
             MonitoringStatsQuery,
             MonitoringStatsQueryHandler(
                 SqlMonitoringStatsReader(async_session_factory)
             ),
+        )
+        query_bus.register(
+            ListCredentialsQuery,
+            ListCredentialsQueryHandler(credential_admin_store),
+        )
+        query_bus.register(
+            QueueStatusQuery,
+            QueueStatusQueryHandler(self._uow_factory, self.queue),
         )
 
         self.command_bus = command_bus

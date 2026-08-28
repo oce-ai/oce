@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from oce.shared.database.session import Base
 from oce.infrastructure.embed.credential_reranker import CredentialConfiguredReranker
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
+from oce.infrastructure.persistence.models import EmbeddingCredentialModel
 from oce.shared.config.settings import RerankSettings
 
 
@@ -18,22 +18,16 @@ async def _runtime():
 async def test_active_credential_configures_reranker():
     engine, sessions = await _runtime()
     async with sessions() as session:
-        provider = EmbeddingProviderModel(
-            code="siliconflow",
-            display_name="SiliconFlow",
-            rerank_endpoint="https://database.test/v1/rerank",
-            rerank_model="database-reranker",
-        )
-        session.add(provider)
-        await session.flush()
         session.add(
             EmbeddingCredentialModel(
-                provider_id=provider.id,
+                provider="siliconflow",
                 name="primary",
                 api_key="database-key",
                 api_key_hash="rerank-hash",
                 priority=1,
                 timeout_seconds=45,
+                rerank_endpoint="https://database.test/v1/rerank",
+                rerank_model="database-reranker",
             )
         )
         await session.commit()
@@ -71,21 +65,15 @@ async def test_credential_id_and_usage_callback_wired_through():
     """DB 凭证的 id 填入 config，并把 credential_id + on_usage 透传给底层 delegate。"""
     engine, sessions = await _runtime()
     async with sessions() as session:
-        provider = EmbeddingProviderModel(
-            code="siliconflow",
-            display_name="SiliconFlow",
-            rerank_endpoint="https://database.test/v1/rerank",
-            rerank_model="database-reranker",
-        )
-        session.add(provider)
-        await session.flush()
         credential = EmbeddingCredentialModel(
-            provider_id=provider.id,
+            provider="siliconflow",
             name="primary",
             api_key="database-key",
             api_key_hash="rerank-hash",
             priority=1,
             timeout_seconds=45,
+            rerank_endpoint="https://database.test/v1/rerank",
+            rerank_model="database-reranker",
         )
         session.add(credential)
         await session.commit()

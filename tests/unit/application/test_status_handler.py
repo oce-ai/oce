@@ -9,8 +9,6 @@ from oce.application.queries.status import (
     BlobStatusQueryHandler,
     FindMissingQuery,
     FindMissingQueryHandler,
-    OverviewContextQuery,
-    OverviewContextQueryHandler,
     ResolveScopeQuery,
     ResolveScopeQueryHandler,
 )
@@ -108,28 +106,6 @@ class TestBlobStatusQueryHandler:
         assert result.unknown == ("ghost",)
         assert result.nonindexed == ()
         assert result.checkpoint_not_found is False
-
-
-async def test_overview_context_returns_key_docs_and_bounded_paths(repos):
-    factory, blob_repo, _ = repos
-    readme = await _save_ready_blob(blob_repo, "README.md", "# Project\nDetails")
-    source = await _save_ready_blob(blob_repo, "src/main.py", "print('hi')")
-    blob_repo.contents[readme] = ("README.md", "# Project\nDetails")
-
-    result = await OverviewContextQueryHandler(factory).handle(
-        OverviewContextQuery(
-            frozenset({readme, source}),
-            paths_limit=1,
-            key_doc_max_bytes=12,
-        )
-    )
-
-    assert result.paths == ("README.md",)
-    assert result.paths_total == 2
-    assert len(result.key_docs) == 1
-    assert result.key_docs[0].path == "README.md"
-    assert result.key_docs[0].content == "# Project"
-    assert result.key_docs[0].truncated is True
 
 
 class TestResolveScopeQueryHandler:

@@ -9,7 +9,7 @@ import httpx
 
 from oce.api.router import get_application
 from oce.application.service import BatchUploadResult, RetrievalResult
-from oce.auth import _unauthorized, verify_api_key
+from oce.auth import _unauthorized, verify_admin_key, verify_api_key
 from oce.domain.services.search import SearchHit
 from oce.main import app
 from oce.shared.errors import (
@@ -58,30 +58,6 @@ class StubApplication:
             checkpoint_not_found=False,
         )
 
-    async def project_overview(self, **kwargs):
-        return SimpleNamespace(
-            key_docs=(
-                SimpleNamespace(
-                    path="README.md",
-                    category="readme",
-                    priority=0,
-                    content="# Project",
-                    truncated=False,
-                    bytes=9,
-                ),
-            ),
-            sections=(
-                SimpleNamespace(
-                    query="Where is the entry point?",
-                    formatted_retrieval="formatted overview",
-                    error=None,
-                ),
-            ),
-            working_set_paths=("README.md", "src/main.py"),
-            working_set_paths_total=2,
-            elapsed_ms=15,
-        )
-
     async def monitoring_stats(self, *, window_hours: int = 24):
         return MonitoringStats(
             window_hours=window_hours,
@@ -116,6 +92,7 @@ async def mock_verify_api_key(authorization: str | None = Header(default=None)) 
 def _transport() -> httpx.ASGITransport:
     app.dependency_overrides[get_application] = lambda: StubApplication()
     app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    app.dependency_overrides[verify_admin_key] = mock_verify_api_key
     return httpx.ASGITransport(app=app)
 
 
@@ -129,7 +106,7 @@ async def test_health_does_not_require_authentication():
 async def test_reload_embedding_credentials_contract():
     async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
         response = await client.post(
-            "/admin/reload-embedding-credentials",
+            "/admin/credentials/reload",
             headers={"Authorization": "Bearer sk-dev"},
         )
 
@@ -232,52 +209,15 @@ async def test_checkpoint_blobs_rejects_malformed_token_with_400():
     assert "INVALID_CHECKPOINT_TOKEN" in response.json()["detail"]
 
 
-async def test_codebase_retrieval_and_paths_contracts():
+async def test_codebase_retrieval_contract():
     body = {"information_request": "entry point", "blobs": {}}
     headers = {"Authorization": "Bearer sk-dev"}
     async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
         retrieval = await client.post("/agents/codebase-retrieval", headers=headers, json=body)
-        paths = await client.post("/agents/codebase-retrieval-paths", headers=headers, json=body)
     assert retrieval.json() == {
         "formatted_retrieval": "formatted",
         "codebase_retrieval_elapsed_ms": 12,
     }
-    assert paths.json() == {
-        "paths": ["src/main.py#L3-3"],
-        "codebase_retrieval_elapsed_ms": 12,
-    }
-
-
-async def test_paths_endpoint_deduplicates_chunks_by_path():
-    class DuplicateApplication(StubApplication):
-        async def retrieve(self, information_request, **kwargs):
-            first = SearchHit(
-                blob_name="blob-hash",
-                path="src/main.py",
-                content="def main(): pass",
-                score=0.9,
-                start_line=3,
-                end_line=3,
-            )
-            second = SearchHit(
-                blob_name="blob-hash",
-                path="src/main.py",
-                content="return 1",
-                score=0.8,
-                start_line=8,
-                end_line=8,
-            )
-            return RetrievalResult((first, second), "formatted", 12)
-
-    app.dependency_overrides[get_application] = lambda: DuplicateApplication()
-    app.dependency_overrides[verify_api_key] = mock_verify_api_key
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/agents/codebase-retrieval-paths",
-            headers={"Authorization": "Bearer sk-dev"},
-            json={"information_request": "entry point", "blobs": {}},
-        )
-    assert response.json()["paths"] == ["src/main.py#L3-3"]
 
 
 async def test_nullable_blob_payload_is_normalized():
@@ -346,55 +286,6 @@ async def test_retrieval_reports_missing_chain_with_404():
         )
     assert response.status_code == 404
     assert "NEEDS_RESET" in response.json()["detail"]
-
-
-async def test_project_overview_rejects_empty_scope_with_400():
-    class ScopedApplication(StubApplication):
-        async def project_overview(self, **kwargs):
-            raise ScopeRequiredError()
-
-    app.dependency_overrides[get_application] = lambda: ScopedApplication()
-    app.dependency_overrides[verify_api_key] = mock_verify_api_key
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            "/agents/project-overview",
-            headers={"Authorization": "Bearer sk-dev"},
-            json={"blobs": {}, "depth": "basic"},
-        )
-    assert response.status_code == 400
-    assert "SCOPE_REQUIRED" in response.json()["detail"]
-
-
-async def test_project_overview_contract():
-    async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
-        response = await client.post(
-            "/agents/project-overview",
-            headers={"Authorization": "Bearer sk-dev"},
-            json={"blobs": {}, "depth": "basic"},
-        )
-    assert response.status_code == 200
-    assert response.json() == {
-        "key_docs": [
-            {
-                "path": "README.md",
-                "category": "readme",
-                "priority": 0,
-                "content": "# Project",
-                "truncated": False,
-                "bytes": 9,
-            }
-        ],
-        "sections": [
-            {
-                "query": "Where is the entry point?",
-                "formatted_retrieval": "formatted overview",
-                "error": None,
-            }
-        ],
-        "working_set_paths": ["README.md", "src/main.py"],
-        "working_set_paths_total": 2,
-        "codebase_retrieval_elapsed_ms": 15,
-    }
 
 
 async def test_admin_stats_contract():

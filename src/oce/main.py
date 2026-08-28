@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from oce.api.admin_router import admin_router
 from oce.api.middleware import ApiCallMetricsMiddleware
 from oce.api.router import router
 from oce.application.container import get_container
@@ -51,6 +52,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(router)
+app.include_router(admin_router)
 
 
 def _metrics_sink_provider():

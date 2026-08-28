@@ -55,6 +55,10 @@ class EmbedWorker:
         self._running = False
         self._tasks: list[asyncio.Task] = []
 
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
     async def start(self) -> None:
         """启动前先恢复上次崩溃残留，再拉起 N 个消费协程"""
         if self._running:

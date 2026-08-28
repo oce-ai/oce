@@ -20,50 +20,42 @@ from sqlalchemy import (
 from oce.shared.database.session import Base
 
 
-class EmbeddingProviderModel(Base):
-    __tablename__ = "embedding_providers"
+class EmbeddingCredentialModel(Base):
+    """扁平凭据：一行 = 一个账号，自带 embed/rerank 渠道配置（无独立 provider 表）。
+
+    embed_endpoint/embed_model 为空则该行不参与嵌入解析；rerank_endpoint/rerank_model
+    为空则不参与重排解析。resolve 时按 status='active' + priority 取最高优先级一条。
+    """
+
+    __tablename__ = "embedding_credentials"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(64), nullable=False, unique=True)
-    display_name = Column(String(128), nullable=False)
+    provider = Column(String(64))  # 渠道标签（如 siliconflow），仅用于分组/复制
+    name = Column(String(128), nullable=False)
+    api_key = Column(String(512), nullable=False)
+    api_key_hash = Column(String(64), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, default="active")
+    priority = Column(Integer, nullable=False, default=100)
+
     embed_endpoint = Column(String(512))
     embed_model = Column(String(128))
-    rerank_endpoint = Column(String(512))
-    rerank_model = Column(String(128))
     dimensions = Column(Integer, nullable=False, default=1024)
     max_batch_size = Column(Integer, nullable=False, default=32)
     max_batch_chars = Column(Integer, nullable=False, default=32_000)
     max_input_chars = Column(Integer, nullable=False, default=8_000)
     input_overlap_chars = Column(Integer, nullable=False, default=400)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    rerank_endpoint = Column(String(512))
+    rerank_model = Column(String(128))
 
-class EmbeddingCredentialModel(Base):
-    __tablename__ = "embedding_credentials"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    provider_id = Column(
-        Integer,
-        ForeignKey("embedding_providers.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    name = Column(String(128), nullable=False)
-    api_key = Column(String(512), nullable=False)
-    api_key_hash = Column(String(64), nullable=False, unique=True)
-    priority = Column(Integer, nullable=False, default=100)
-    status = Column(String(16), nullable=False, default="active")
-    max_batch_size = Column(Integer)
-    max_batch_chars = Column(Integer)
-    note = Column(Text)
-    rate_limit = Column(Integer)
     timeout_seconds = Column(Integer, nullable=False, default=30)
+    rate_limit = Column(Integer)
+    note = Column(Text)
     last_used_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        Index("idx_embedding_credentials_provider_id", "provider_id"),
         Index("idx_embedding_credentials_status", "status"),
         Index("idx_embedding_credentials_priority", "priority"),
     )

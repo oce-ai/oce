@@ -42,24 +42,6 @@ class BlobRepository(Protocol):
     async def save_staging(self, blob_name: str, content: str) -> None: ...
     async def delete_staging(self, blob_name: str) -> None: ...
 
-    async def get_paths(
-        self,
-        blob_names: Sequence[str],
-        limit: int | None = None,
-    ) -> list[str]: ...
-
-    async def count_paths(self, blob_names: Sequence[str]) -> int: ...
-
-    async def get_path_blob_pairs(
-        self,
-        blob_names: Sequence[str],
-    ) -> list[tuple[str, str]]: ...
-
-    async def get_blob_contents(
-        self,
-        blob_names: Sequence[str],
-    ) -> dict[str, tuple[str, str]]: ...
-
     async def find_stale_with_staging(
         self,
         stale_hours: int = 24,

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder, UsageCallback
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
+from oce.infrastructure.persistence.models import EmbeddingCredentialModel
 from oce.shared.config.settings import EmbeddingSettings
 from oce.shared.errors import ServiceNotReadyError
 
@@ -107,28 +107,27 @@ class CredentialConfiguredEmbedder:
 
     async def _resolve_config(self) -> EmbeddingRuntimeConfig:
         async with self._session_factory() as session:
-            row = (
-                await session.execute(
-                    select(EmbeddingCredentialModel, EmbeddingProviderModel)
-                    .join(
-                        EmbeddingProviderModel,
-                        EmbeddingProviderModel.id
-                        == EmbeddingCredentialModel.provider_id,
+            credential = (
+                (
+                    await session.execute(
+                        select(EmbeddingCredentialModel)
+                        .where(
+                            EmbeddingCredentialModel.status == "active",
+                            EmbeddingCredentialModel.embed_endpoint.is_not(None),
+                            EmbeddingCredentialModel.embed_model.is_not(None),
+                        )
+                        .order_by(
+                            EmbeddingCredentialModel.priority,
+                            EmbeddingCredentialModel.id,
+                        )
+                        .limit(1)
                     )
-                    .where(
-                        EmbeddingCredentialModel.status == "active",
-                        EmbeddingProviderModel.embed_endpoint.is_not(None),
-                        EmbeddingProviderModel.embed_model.is_not(None),
-                    )
-                    .order_by(
-                        EmbeddingCredentialModel.priority,
-                        EmbeddingCredentialModel.id,
-                    )
-                    .limit(1)
                 )
-            ).first()
+                .scalars()
+                .first()
+            )
 
-        if row is None:
+        if credential is None:
             key = (
                 self._fallback.api_key.get_secret_value()
                 if self._fallback.api_key is not None
@@ -152,20 +151,15 @@ class CredentialConfiguredEmbedder:
                 proxy=self._fallback.proxy,
             )
         else:
-            credential, provider = row
             config = EmbeddingRuntimeConfig(
-                endpoint=provider.embed_endpoint,
+                endpoint=credential.embed_endpoint,
                 api_key=credential.api_key,
-                model=provider.embed_model,
-                dimensions=provider.dimensions,
-                max_batch_size=(
-                    credential.max_batch_size or provider.max_batch_size
-                ),
-                max_batch_chars=(
-                    credential.max_batch_chars or provider.max_batch_chars
-                ),
-                max_input_chars=provider.max_input_chars,
-                input_overlap_chars=provider.input_overlap_chars,
+                model=credential.embed_model,
+                dimensions=credential.dimensions,
+                max_batch_size=credential.max_batch_size,
+                max_batch_chars=credential.max_batch_chars,
+                max_input_chars=credential.max_input_chars,
+                input_overlap_chars=credential.input_overlap_chars,
                 max_concurrency=self._fallback.max_concurrency,
                 timeout_seconds=float(credential.timeout_seconds),
                 proxy=self._fallback.proxy,

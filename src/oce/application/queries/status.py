@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from oce.application.messages import Query
 from oce.application.uow import UnitOfWorkFactory
 from oce.domain.chain.chain import Chain
-from oce.domain.services.key_docs import match_key_docs, truncate_utf8_lines
 from oce.shared.errors import (
     InvalidCheckpointTokenError,
     NeedsResetError,
@@ -118,67 +117,3 @@ class ResolveScopeQueryHandler:
             raise ScopeRequiredError()
         scope = (base | set(query.added_blobs)) - set(query.deleted_blobs)
         return ResolveScopeResult(frozenset(scope))
-
-
-@dataclass(frozen=True)
-class KeyDocResult:
-    path: str
-    category: str
-    priority: int
-    content: str
-    truncated: bool
-    bytes: int
-
-
-@dataclass(frozen=True)
-class OverviewContextQuery(Query):
-    blob_names: frozenset[str] = frozenset()
-    paths_limit: int = 1000
-    key_doc_max_bytes: int = 2048
-
-
-@dataclass(frozen=True)
-class OverviewContextResult:
-    key_docs: tuple[KeyDocResult, ...]
-    paths: tuple[str, ...]
-    paths_total: int
-
-
-class OverviewContextQueryHandler:
-    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
-        self._uow_factory = uow_factory
-
-    async def handle(self, query: OverviewContextQuery) -> OverviewContextResult:
-        if not query.blob_names:
-            return OverviewContextResult((), (), 0)
-        names = tuple(query.blob_names)
-        async with self._uow_factory() as uow:
-            paths = await uow.blobs.get_paths(names, limit=query.paths_limit)
-            paths_total = await uow.blobs.count_paths(names)
-            pairs = await uow.blobs.get_path_blob_pairs(names)
-            matches = match_key_docs([path for path, _blob_name in pairs])
-            path_to_blob: dict[str, str] = {}
-            for path, blob_name in pairs:
-                path_to_blob.setdefault(path, blob_name)
-            contents = await uow.blobs.get_blob_contents(
-                [path_to_blob[match.path] for match in matches]
-            )
-
-        key_docs: list[KeyDocResult] = []
-        for match in matches:
-            blob_name = path_to_blob[match.path]
-            item = contents.get(blob_name)
-            if item is None or not item[1]:
-                continue
-            content, truncated = truncate_utf8_lines(item[1], query.key_doc_max_bytes)
-            key_docs.append(
-                KeyDocResult(
-                    path=match.path,
-                    category=match.category,
-                    priority=match.priority,
-                    content=content,
-                    truncated=truncated,
-                    bytes=len(content.encode("utf-8")),
-                )
-            )
-        return OverviewContextResult(tuple(key_docs), tuple(paths), paths_total)

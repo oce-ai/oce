@@ -322,6 +322,10 @@ class Settings(BaseSettings):
         default="sk-opencontextengine",
         description="API 认证密钥；个人模式用与客户端约定的固定值，服务模式须改为强随机值",
     )
+    admin_api_key: str = Field(
+        default="",
+        description="Admin 接口密钥；空则回落 API_KEY，一旦配置则 admin 接口只认此 key",
+    )
 
     # 子配置组
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)

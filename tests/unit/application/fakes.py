@@ -23,7 +23,6 @@ class FakeBlobRepo:
 
     def __init__(self) -> None:
         self.blobs: dict[str, Blob] = {}
-        self.contents: dict[str, tuple[str, str]] = {}
         self.staging: dict[str, str] = {}  # blob_name -> content
 
     async def save(self, blob: Blob) -> None:
@@ -69,23 +68,6 @@ class FakeBlobRepo:
     async def delete_staging(self, blob_name: str) -> None:
         """删除 staging 原文（测试替身）"""
         self.staging.pop(blob_name, None)
-
-    async def get_paths(self, blob_names, limit=None) -> list[str]:
-        paths = sorted({self.blobs[name].path for name in blob_names if name in self.blobs})
-        return paths if limit is None else paths[:limit]
-
-    async def count_paths(self, blob_names) -> int:
-        return len(await self.get_paths(blob_names))
-
-    async def get_path_blob_pairs(self, blob_names) -> list[tuple[str, str]]:
-        return sorted(
-            (self.blobs[name].path, name)
-            for name in blob_names
-            if name in self.blobs
-        )
-
-    async def get_blob_contents(self, blob_names) -> dict[str, tuple[str, str]]:
-        return {name: self.contents[name] for name in blob_names if name in self.contents}
 
 
 class FakeChainRepo:

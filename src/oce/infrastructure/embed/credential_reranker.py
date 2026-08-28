@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.domain.services.reranker import NoopReranker, Reranker
 from oce.infrastructure.embed.openai_reranker import OpenAIReranker, UsageCallback
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
+from oce.infrastructure.persistence.models import EmbeddingCredentialModel
 from oce.shared.config.settings import RerankSettings
 
 
@@ -77,32 +77,31 @@ class CredentialConfiguredReranker:
         if not self._fallback.enabled:
             return None
         async with self._session_factory() as session:
-            row = (
-                await session.execute(
-                    select(EmbeddingCredentialModel, EmbeddingProviderModel)
-                    .join(
-                        EmbeddingProviderModel,
-                        EmbeddingProviderModel.id == EmbeddingCredentialModel.provider_id,
+            credential = (
+                (
+                    await session.execute(
+                        select(EmbeddingCredentialModel)
+                        .where(
+                            EmbeddingCredentialModel.status == "active",
+                            EmbeddingCredentialModel.rerank_endpoint.is_not(None),
+                            EmbeddingCredentialModel.rerank_model.is_not(None),
+                        )
+                        .order_by(
+                            EmbeddingCredentialModel.priority,
+                            EmbeddingCredentialModel.id,
+                        )
+                        .limit(1)
                     )
-                    .where(
-                        EmbeddingCredentialModel.status == "active",
-                        EmbeddingProviderModel.rerank_endpoint.is_not(None),
-                        EmbeddingProviderModel.rerank_model.is_not(None),
-                    )
-                    .order_by(
-                        EmbeddingCredentialModel.priority,
-                        EmbeddingCredentialModel.id,
-                    )
-                    .limit(1)
                 )
-            ).first()
+                .scalars()
+                .first()
+            )
 
-        if row is not None:
-            credential, provider = row
+        if credential is not None:
             return RerankRuntimeConfig(
-                endpoint=provider.rerank_endpoint,
+                endpoint=credential.rerank_endpoint,
                 api_key=credential.api_key,
-                model=provider.rerank_model,
+                model=credential.rerank_model,
                 top_n=self._fallback.top_n,
                 min_score=self._fallback.min_score,
                 timeout_seconds=float(credential.timeout_seconds),

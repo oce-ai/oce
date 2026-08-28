@@ -54,6 +54,16 @@ class NeedsResetError(ApplicationError):
         super().__init__(reason, code="NEEDS_RESET")
 
 
+class CredentialConflictError(ApplicationError):
+    """新增/复制凭据时 api_key 已存在（api_key_hash 唯一冲突）。"""
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(
+            reason or "凭据的 api_key 已存在",
+            code="CREDENTIAL_CONFLICT",
+        )
+
+
 class ScopeRequiredError(ApplicationError):
     """检索请求未声明工作集：必须提供 checkpoint_id 或 added_blobs。
 

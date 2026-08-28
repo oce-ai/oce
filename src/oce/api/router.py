@@ -5,27 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from oce.api.schemas import (
-    ApiCallStatsResponse,
     BatchUploadRequest,
     BatchUploadResponse,
     BlobStatusRequest,
     BlobStatusResponse,
     CheckpointBlobsRequest,
     CheckpointBlobsResponse,
-    CodebaseRetrievalPathsResponse,
     CodebaseRetrievalRequest,
     CodebaseRetrievalResponse,
     FindMissingRequest,
     FindMissingResponse,
-    KeyDocSection,
-    MonitoringStatsResponse,
-    ProjectOverviewRequest,
-    ProjectOverviewResponse,
-    ProjectOverviewSection,
-    ReloadCredentialsResponse,
-    ResourceSnapshotResponse,
-    RetrievalStatsResponse,
-    TokenKindStatsResponse,
 )
 from oce.application.container import get_container
 from oce.application.service import BlobUpload, RetrievalApplication
@@ -45,21 +34,6 @@ def get_application() -> RetrievalApplication:
 
 def _service_unavailable(exc: ServiceNotReadyError) -> HTTPException:
     return HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "0"})
-
-
-@router.post(
-    "/admin/reload-embedding-credentials",
-    response_model=ReloadCredentialsResponse,
-)
-async def reload_embedding_credentials(
-    application: RetrievalApplication = Depends(get_application),
-) -> ReloadCredentialsResponse:
-    result = await application.reload_embedding_credentials()
-    return ReloadCredentialsResponse(
-        reloaded=result.reloaded,
-        pool_size=result.pool_size,
-        reason=result.reason,
-    )
 
 
 @router.post("/find-missing", response_model=FindMissingResponse)
@@ -122,28 +96,6 @@ async def codebase_retrieval(
     )
 
 
-@router.post(
-    "/agents/codebase-retrieval-paths",
-    response_model=CodebaseRetrievalPathsResponse,
-)
-async def codebase_retrieval_paths(
-    request: CodebaseRetrievalRequest,
-    application: RetrievalApplication = Depends(get_application),
-) -> CodebaseRetrievalPathsResponse:
-    result = await _retrieve(application, request)
-    paths: list[str] = []
-    seen: set[str] = set()
-    for hit in result.hits:
-        if hit.path in seen:
-            continue
-        seen.add(hit.path)
-        paths.append(f"{hit.path}#L{hit.start_line}-{hit.end_line}")
-    return CodebaseRetrievalPathsResponse(
-        paths=paths,
-        codebase_retrieval_elapsed_ms=result.elapsed_ms,
-    )
-
-
 @router.post("/checkpoint-blobs", response_model=CheckpointBlobsResponse)
 async def checkpoint_blobs(
     request: CheckpointBlobsRequest,
@@ -176,96 +128,4 @@ async def blob_status(
         unknown_blob_names=list(result.unknown),
         nonindexed_blob_names=list(result.nonindexed),
         checkpoint_not_found=result.checkpoint_not_found,
-    )
-
-
-@router.post("/agents/project-overview", response_model=ProjectOverviewResponse)
-async def project_overview(
-    request: ProjectOverviewRequest,
-    application: RetrievalApplication = Depends(get_application),
-) -> ProjectOverviewResponse:
-    try:
-        result = await application.project_overview(
-            depth=request.depth,
-            checkpoint_id=request.blobs.checkpoint_id or None,
-            added_blobs=request.blobs.added_blobs,
-            deleted_blobs=request.blobs.deleted_blobs,
-        )
-    except ServiceNotReadyError as exc:
-        raise _service_unavailable(exc) from exc
-    except (ScopeRequiredError, InvalidCheckpointTokenError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except NeedsResetError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ProjectOverviewResponse(
-        key_docs=[
-            KeyDocSection(
-                path=document.path,
-                category=document.category,
-                priority=document.priority,
-                content=document.content,
-                truncated=document.truncated,
-                bytes=document.bytes,
-            )
-            for document in result.key_docs
-        ],
-        sections=[
-            ProjectOverviewSection(
-                query=section.query,
-                formatted_retrieval=section.formatted_retrieval,
-                error=section.error,
-            )
-            for section in result.sections
-        ],
-        working_set_paths=list(result.working_set_paths),
-        working_set_paths_total=result.working_set_paths_total,
-        codebase_retrieval_elapsed_ms=result.elapsed_ms,
-    )
-
-
-@router.get("/admin/stats", response_model=MonitoringStatsResponse)
-async def admin_stats(
-    window_hours: int = 24,
-    application: RetrievalApplication = Depends(get_application),
-) -> MonitoringStatsResponse:
-    stats = await application.monitoring_stats(window_hours=window_hours)
-    return MonitoringStatsResponse(
-        window_hours=stats.window_hours,
-        api_calls=ApiCallStatsResponse(
-            count=stats.api_calls.count,
-            error_count=stats.api_calls.error_count,
-            avg_latency_ms=stats.api_calls.avg_latency_ms,
-            p50_latency_ms=stats.api_calls.p50_latency_ms,
-            p95_latency_ms=stats.api_calls.p95_latency_ms,
-            max_latency_ms=stats.api_calls.max_latency_ms,
-        ),
-        tokens=[
-            TokenKindStatsResponse(
-                kind=token.kind,
-                calls=token.calls,
-                prompt_tokens=token.prompt_tokens,
-                completion_tokens=token.completion_tokens,
-                total_tokens=token.total_tokens,
-            )
-            for token in stats.tokens
-        ],
-        tokens_total=stats.tokens_total,
-        retrieval=RetrievalStatsResponse(
-            count=stats.retrieval.count,
-            empty_count=stats.retrieval.empty_count,
-            empty_rate=stats.retrieval.empty_rate,
-        ),
-        resource=(
-            ResourceSnapshotResponse(
-                ts=stats.resource.ts,
-                mem_rss_bytes=stats.resource.mem_rss_bytes,
-                mem_percent=stats.resource.mem_percent,
-                cpu_percent=stats.resource.cpu_percent,
-                disk_free_bytes=stats.resource.disk_free_bytes,
-                disk_total_bytes=stats.resource.disk_total_bytes,
-                disk_data_bytes=stats.resource.disk_data_bytes,
-            )
-            if stats.resource is not None
-            else None
-        ),
     )

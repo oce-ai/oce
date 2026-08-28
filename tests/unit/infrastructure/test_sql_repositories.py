@@ -307,29 +307,6 @@ async def test_batch_operations(sqlite_session):
 
 
 @pytest.mark.asyncio
-async def test_blob_repository_reconstructs_overlapping_chunk_content(sqlite_session):
-    blob_repo = SqlBlobRepository(sqlite_session)
-    chunk_repo = SqlChunkRepository(sqlite_session)
-    first = Chunk(make_sha256("first"), "README.md", "one\ntwo", 1, 2)
-    second = Chunk(make_sha256("second"), "README.md", "two\nthree", 2, 3)
-    await chunk_repo.save_many([first, second])
-    name = make_sha256("readme-blob")
-    await blob_repo.save(
-        Blob(
-            blob_name=name,
-            path="README.md",
-            status=BlobStatus.READY,
-            chunks=[first.to_ref(), second.to_ref()],
-        )
-    )
-    await sqlite_session.commit()
-
-    contents = await blob_repo.get_blob_contents([name])
-
-    assert contents[name] == ("README.md", "one\ntwo\nthree")
-
-
-@pytest.mark.asyncio
 async def test_blob_delete_only_removes_unreferenced_chunks(sqlite_session):
     blob_repo = SqlBlobRepository(sqlite_session)
     chunk_repo = SqlChunkRepository(sqlite_session)

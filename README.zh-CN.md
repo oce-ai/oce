@@ -61,12 +61,12 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 
 ## 个人模式
 
-安装 CLI、生成配置、填两个 key，然后启动：
+安装 CLI、生成配置、填好嵌入 key，然后启动：
 
 ```powershell
 uv tool install opencontextengine
 oce init                    # 生成 ~/.oce/data/.env
-# 编辑 ~/.oce/data/.env：设置 API_KEY 和 EMBED_API_KEY
+# 编辑 ~/.oce/data/.env：设置 EMBED_API_KEY（API_KEY 已为本机预填）
 oce serve                   # http://127.0.0.1:8986
 ```
 

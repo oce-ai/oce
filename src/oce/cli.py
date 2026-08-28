@@ -44,33 +44,29 @@ def _configure_logging(verbose: int, data_dir: Path | None = None) -> None:
 
 _PERSONAL_ENV_TEMPLATE = """\
 # OpenContextEngine 个人模式配置
-# 数据库 / 向量库 / 后台 worker 已由 `oce serve` 自动设为本地文件，无需在此配置。
-# 此文件位于 data 目录，serve 启动时会自动加载（无需 --env-file）。
-# 编辑保存后运行：oce serve
+
+# ==================== 鉴权（已按客户端约定预填，一般无需修改）====================
+# HTTP Bearer 鉴权令牌（客户端用 Authorization: Bearer <token> 访问）。
+# 个人模式默认使用与客户端约定的固定值，本机开箱即用；如需自定义须同步改客户端。
+API_KEY=sk-opencontextengine
 
 # ==================== 必填 ====================
-# HTTP Bearer 鉴权令牌（客户端用 Authorization: Bearer <token> 访问）
-API_KEY=replace-with-a-long-random-value
-
-# 嵌入服务 API 密钥（个人模式必填；缺失则无法建索引 / 检索）
-EMBED_API_KEY=your_embedding_api_key_here
+# 嵌入服务 API 密钥（个人模式唯一必填项；缺失则无法建索引 / 检索）
+EMBED_API_KEY=YOUR_EMBEDDING_API_KEY_HERE
 
 # ==================== 嵌入服务（按需调整）====================
 # OpenAI 兼容端点（默认 SiliconFlow）
 # EMBED_ENDPOINT=https://api.siliconflow.cn/v1/embeddings
 # 嵌入模型（须与 EMBED_DIMENSIONS 维度匹配）
-# EMBED_MODEL=Qwen/Qwen3-Embedding-0.6B
+# EMBED_MODEL=Qwen/Qwen3-Embedding-4B
 # 向量维度（必须与模型输出维度一致）
 # EMBED_DIMENSIONS=1024
 
 # ==================== 可选：LLM 增强 ====================
 # 重排 / 意图分类默认开启，二者共用下面这个 LLM 客户端。
-# 要用就填 LLM_API_KEY；不用就把两个开关设为 false（否则缺 key 时检索会报错）。
 # LLM_API_KEY=your_llm_api_key_here
-# LLM_BASE_URL=https://api.siliconflow.cn/v1
-# LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
-# LLM_RERANK_ENABLED=false
-# RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false
+# LLM_BASE_URL=https://openrouter.ai/api/v1
+# LLM_MODEL=inclusionai/ling-3.0-flash-fin:free
 
 # ==================== 可选：日志落盘 ====================
 # 日志是否写入文件（默认 false，仅输出到控制台）
@@ -122,7 +118,7 @@ def _init(args: argparse.Namespace) -> None:
         sys.exit(f".env already exists: {target} (use --force to overwrite)")
     target.write_text(_PERSONAL_ENV_TEMPLATE, encoding="utf-8")
     print(f"Created {target}")
-    print("Next: set EMBED_API_KEY (and API_KEY), then run `oce serve`.")
+    print("Next: set EMBED_API_KEY (API_KEY is pre-filled), then run `oce serve`.")
 
 
 def _serve(args: argparse.Namespace) -> None:

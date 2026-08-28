@@ -83,7 +83,7 @@ class EmbeddingSettings(BaseSettings):
         description="OpenAI 兼容的 embedding 端点",
     )
     api_key: SecretStr | None = Field(default=None, description="Embedding API 密钥")
-    model: str = Field(default="Qwen/Qwen3-Embedding-0.6B", description="嵌入模型")
+    model: str = Field(default="Qwen/Qwen3-Embedding-4B", description="嵌入模型")
     dimensions: int = Field(default=1024, ge=1, description="向量维度")
     max_batch_size: int = Field(default=32, ge=1, le=256, description="单请求文本数")
     max_batch_chars: int = Field(
@@ -318,7 +318,10 @@ class Settings(BaseSettings):
     )
 
     # API
-    api_key: str = Field(default="sk-changeme", description="API 认证密钥")
+    api_key: str = Field(
+        default="sk-opencontextengine",
+        description="API 认证密钥；个人模式用与客户端约定的固定值，服务模式须改为强随机值",
+    )
 
     # 子配置组
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)

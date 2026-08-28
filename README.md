@@ -64,12 +64,12 @@ Redis; its development stack is defined in `docker-compose.dev.yml`.
 
 ## Personal mode
 
-Install the CLI, generate a config, fill in two keys, and serve:
+Install the CLI, generate a config, set the embedding key, and serve:
 
 ```powershell
 uv tool install opencontextengine
 oce init                    # writes ~/.oce/data/.env
-# edit ~/.oce/data/.env: set API_KEY and EMBED_API_KEY
+# edit ~/.oce/data/.env: set EMBED_API_KEY (API_KEY is pre-filled for local use)
 oce serve                   # http://127.0.0.1:8986
 ```
 

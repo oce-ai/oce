@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from oce.application.commands.checkpoint import CheckpointCommand
 from oce.application.commands.ingest import (
     DeleteBlobsCommand,
     EmbedPendingCommand,
@@ -16,7 +17,7 @@ from oce.application.queries.status import (
     ResolveScopeQuery,
     ResolveScopeResult,
 )
-from oce.application.service import RetrievalApplication
+from oce.application.service import BlobUpload, RetrievalApplication, compute_blob_name
 from oce.domain.services.search import SearchHit
 
 
@@ -137,3 +138,39 @@ async def test_batch_upload_does_not_embed_synchronously_with_background_worker(
     assert result.embedded_count == 0
     assert sum(isinstance(item, IngestBlobsCommand) for item in commands.commands) == 1
     assert not any(isinstance(item, EmbedPendingCommand) for item in commands.commands)
+
+
+class UploadCommandBus(SpyCommandBus):
+    """完整响应 batch_upload 流程的 command bus（ingest → embed → checkpoint）"""
+
+    async def execute(self, command):
+        self.commands.append(command)
+        if isinstance(command, IngestBlobsCommand):
+            return SimpleNamespace(chunk_count=0)
+        if isinstance(command, EmbedPendingCommand):
+            return SimpleNamespace(embedded_count=0)
+        if isinstance(command, CheckpointCommand):
+            return SimpleNamespace(new_checkpoint_id=f"{command.checkpoint_id}_v1")
+        return None
+
+
+async def test_batch_upload_registers_blobs_to_checkpoint_when_id_given():
+    commands = UploadCommandBus()
+    application = RetrievalApplication(commands, SpyQueryBus())
+    blob = BlobUpload("src/a.py", "print(1)\n")
+
+    await application.batch_upload([blob], checkpoint_id="chain:2")
+
+    checkpoint = next(c for c in commands.commands if isinstance(c, CheckpointCommand))
+    assert checkpoint.checkpoint_id == "chain:2"
+    assert checkpoint.added_blobs == (compute_blob_name(blob.path, blob.content),)
+    assert checkpoint.deleted_blobs == ()
+
+
+async def test_batch_upload_without_checkpoint_id_skips_checkpoint():
+    commands = UploadCommandBus()
+    application = RetrievalApplication(commands, SpyQueryBus())
+
+    await application.batch_upload([BlobUpload("src/a.py", "print(1)\n")])
+
+    assert not any(isinstance(c, CheckpointCommand) for c in commands.commands)

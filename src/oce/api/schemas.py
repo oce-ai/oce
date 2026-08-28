@@ -23,6 +23,12 @@ class BlobInput(BaseModel):
 
 class BatchUploadRequest(BaseModel):
     blobs: list[BlobInput] = Field(default_factory=list)
+    checkpoint_id: str = ""
+
+    @field_validator("checkpoint_id", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value: Any) -> Any:
+        return "" if value is None else value
 
 
 class BatchUploadResponse(BaseModel):

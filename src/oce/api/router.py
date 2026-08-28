@@ -76,10 +76,15 @@ async def batch_upload(
 ) -> BatchUploadResponse:
     try:
         result = await application.batch_upload(
-            [BlobUpload(blob.path, blob.content) for blob in request.blobs]
+            [BlobUpload(blob.path, blob.content) for blob in request.blobs],
+            checkpoint_id=request.checkpoint_id or None,
         )
     except ServiceNotReadyError as exc:
         raise _service_unavailable(exc) from exc
+    except InvalidCheckpointTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NeedsResetError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return BatchUploadResponse(blob_names=list(result.blob_names))
 
 
@@ -146,7 +151,9 @@ async def checkpoint_blobs(
             added_blobs=payload.added_blobs,
             deleted_blobs=payload.deleted_blobs,
         )
-    except (InvalidCheckpointTokenError, NeedsResetError) as exc:
+    except InvalidCheckpointTokenError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NeedsResetError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CheckpointBlobsResponse(new_checkpoint_id=result.new_checkpoint_id)
 

@@ -110,7 +110,12 @@ class RetrievalApplication:
     ) -> ReloadEmbeddingCredentialsResult:
         return await self._commands.execute(ReloadEmbeddingCredentialsCommand())
 
-    async def batch_upload(self, blobs: list[BlobUpload]) -> BatchUploadResult:
+    async def batch_upload(
+        self,
+        blobs: list[BlobUpload],
+        *,
+        checkpoint_id: str | None = None,
+    ) -> BatchUploadResult:
         commands = tuple(
             IngestBlobCommand(
                 compute_blob_name(blob.path, blob.content),
@@ -125,6 +130,12 @@ class RetrievalApplication:
         if not self._background_indexing:
             embedded = await self._commands.execute(EmbedPendingCommand(tuple(names)))
             embedded_count = embedded.embedded_count
+        if checkpoint_id:
+            # 可选：上传内容索引后，把本次 blob 直接登记进已有 checkpoint 链
+            # （CheckpointCommand 对非空 checkpoint_id 只推进已有链，不会隐式创建）
+            await self._commands.execute(
+                CheckpointCommand(checkpoint_id, tuple(names), ())
+            )
         return BatchUploadResult(tuple(names), result.chunk_count, embedded_count)
 
     async def retrieve(

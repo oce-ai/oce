@@ -26,7 +26,7 @@ class StubApplication:
     async def find_missing(self, names):
         return SimpleNamespace(unknown=("missing",), nonindexed=("pending",))
 
-    async def batch_upload(self, blobs):
+    async def batch_upload(self, blobs, **kwargs):
         assert blobs[0].path == "src/main.py"
         return BatchUploadResult(("blob-hash",), 1, 1)
 
@@ -124,6 +124,84 @@ async def test_batch_upload_contract():
         )
     assert response.status_code == 200
     assert response.json() == {"blob_names": ["blob-hash"]}
+
+
+async def test_batch_upload_passes_checkpoint_id():
+    class CheckpointUploadApplication(StubApplication):
+        async def batch_upload(self, blobs, **kwargs):
+            assert kwargs.get("checkpoint_id") == "chain:1"
+            return BatchUploadResult(("blob-hash",), 1, 1)
+
+    app.dependency_overrides[get_application] = lambda: CheckpointUploadApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/batch-upload",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={
+                "blobs": [{"path": "src/main.py", "content": "def main(): pass"}],
+                "checkpoint_id": "chain:1",
+            },
+        )
+    assert response.status_code == 200
+    assert response.json() == {"blob_names": ["blob-hash"]}
+
+
+async def test_batch_upload_rejects_missing_chain_with_404():
+    class MissingChainApplication(StubApplication):
+        async def batch_upload(self, blobs, **kwargs):
+            raise NeedsResetError("checkpoint 链不存在（服务端状态丢失）")
+
+    app.dependency_overrides[get_application] = lambda: MissingChainApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/batch-upload",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={
+                "blobs": [{"path": "src/main.py", "content": "def main(): pass"}],
+                "checkpoint_id": "ghost:1",
+            },
+        )
+    assert response.status_code == 404
+    assert "NEEDS_RESET" in response.json()["detail"]
+
+
+async def test_batch_upload_rejects_malformed_checkpoint_with_400():
+    class MalformedChainApplication(StubApplication):
+        async def batch_upload(self, blobs, **kwargs):
+            raise InvalidCheckpointTokenError("bad-token")
+
+    app.dependency_overrides[get_application] = lambda: MalformedChainApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/batch-upload",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={
+                "blobs": [{"path": "src/main.py", "content": "def main(): pass"}],
+                "checkpoint_id": "bad-token",
+            },
+        )
+    assert response.status_code == 400
+    assert "INVALID_CHECKPOINT_TOKEN" in response.json()["detail"]
+
+
+async def test_checkpoint_blobs_rejects_malformed_token_with_400():
+    class MalformedChainApplication(StubApplication):
+        async def checkpoint(self, **kwargs):
+            raise InvalidCheckpointTokenError("bad-token")
+
+    app.dependency_overrides[get_application] = lambda: MalformedChainApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/checkpoint-blobs",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={"blobs": {"checkpoint_id": "bad-token"}},
+        )
+    assert response.status_code == 400
+    assert "INVALID_CHECKPOINT_TOKEN" in response.json()["detail"]
 
 
 async def test_codebase_retrieval_and_paths_contracts():

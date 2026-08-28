@@ -255,6 +255,24 @@ class WorkerSettings(BaseSettings):
     max_retries: int = Field(default=3, ge=1, le=10, description="失败重试上限")
 
 
+class LogSettings(BaseSettings):
+    """日志配置"""
+
+    model_config = SettingsConfigDict(
+        env_prefix="LOG_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    file_enabled: bool = Field(default=False, description="是否启用日志落盘")
+    file_path: str | None = Field(default=None, description="日志文件路径（None 时自动推断）")
+    rotation: str = Field(default="100 MB", description="轮转策略：'1 day' 按天 / '100 MB' 按大小")
+    retention: str = Field(default="30 days", description="保留时长：'30 days' / '10 files'")
+    format_json: bool = Field(default=False, description="是否使用 JSON 格式（便于日志采集）")
+    level: str = Field(default="INFO", description="日志级别（WARNING/INFO/DEBUG）")
+
+
 class Settings(BaseSettings):
     """全局配置 - 聚合所有配置组"""
 
@@ -277,6 +295,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     worker: WorkerSettings = Field(default_factory=WorkerSettings)
+    log: LogSettings = Field(default_factory=LogSettings)
 
 @lru_cache
 def get_settings() -> Settings:

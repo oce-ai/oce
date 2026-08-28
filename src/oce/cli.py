@@ -22,12 +22,24 @@ def _verbose_level(verbose: int) -> int:
     return min(max(verbose, 0), len(_LOG_LEVELS) - 1)
 
 
-def _configure_logging(verbose: int) -> None:
-    """按 -v 次数配置 loguru；替换默认 stderr handler，只影响 OCE 内部日志。"""
-    from loguru import logger
+def _configure_logging(verbose: int, data_dir: Path | None = None) -> None:
+    """按 -v 次数配置 loguru；替换默认 stderr handler，只影响 OCE 内部日志。
 
-    logger.remove()
-    logger.add(sys.stderr, level=_LOG_LEVELS[_verbose_level(verbose)])
+    Args:
+        verbose: -v 次数，决定日志级别
+        data_dir: 数据目录（个人模式）；服务模式下为 None
+    """
+    from oce.shared.config.settings import get_settings
+    from oce.shared.logging import DATA_DIR_ENV, LOG_LEVEL_ENV, configure_logging
+
+    level = _LOG_LEVELS[_verbose_level(verbose)]
+    settings = get_settings()
+    configure_logging(settings.log, level=level, data_dir=data_dir)
+
+    # 把上下文传给 uvicorn 启动后的 app lifespan，使其复用同一配置（避免二次配置丢失路径/级别）
+    os.environ[LOG_LEVEL_ENV] = level
+    if data_dir is not None:
+        os.environ[DATA_DIR_ENV] = str(data_dir)
 
 
 _PERSONAL_ENV_TEMPLATE = """\
@@ -59,6 +71,20 @@ EMBED_API_KEY=your_embedding_api_key_here
 # LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 # LLM_RERANK_ENABLED=false
 # RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false
+
+# ==================== 可选：日志落盘 ====================
+# 日志是否写入文件（默认 false，仅输出到控制台）
+# LOG_FILE_ENABLED=true
+# 日志文件路径（默认 <data-dir>/logs/oce.log）
+# LOG_FILE_PATH=/var/log/oce/oce.log
+# 轮转策略：按天 '1 day' / 按大小 '100 MB'
+# LOG_ROTATION=1 day
+# 保留时长：按时间 '30 days' / 按文件数 '10 files'
+# LOG_RETENTION=30 days
+# JSON 格式（便于日志采集，默认 false）
+# LOG_FORMAT_JSON=false
+# 日志级别（WARNING/INFO/DEBUG，默认 INFO）
+# LOG_LEVEL=INFO
 """
 
 
@@ -105,6 +131,9 @@ def _serve(args: argparse.Namespace) -> None:
     _load_personal_env(data_dir, args.env_file)
     for key, value in _local_defaults(data_dir).items():
         os.environ.setdefault(key, value)
+
+    # 配置日志（需在加载 .env 后，读取配置前）
+    _configure_logging(args.verbose, data_dir)
 
     # 个人模式每次启动自动迁移（SQLite 文件可直接幂等升级）
     from oce.infrastructure.persistence.migrations import run_migrations
@@ -170,7 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    _configure_logging(args.verbose)
+    # serve 在 _serve 内配置日志（带 data_dir 上下文）；init/version 不打日志，无需配置
     args.handler(args)
 
 

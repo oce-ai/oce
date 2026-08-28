@@ -137,7 +137,9 @@ SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`ma
 $headers = @{ Authorization = "Bearer $env:API_KEY" }
 $body = @{
   information_request = "Where is request authentication implemented?"
-  blobs = @{ checkpoint_id = ""; added_blobs = @(); deleted_blobs = @() }
+  # 全库检索已禁用：必须声明工作集（有效的 checkpoint_id 或非空 added_blobs）。
+  # added_blobs 是 batch-upload 返回的 blob_name（sha256 内容地址），此处为示例占位。
+  blobs = @{ checkpoint_id = ""; added_blobs = @("<blob-name-from-batch-upload>"); deleted_blobs = @() }
 } | ConvertTo-Json -Depth 4
 Invoke-RestMethod http://127.0.0.1:8986/agents/codebase-retrieval `
   -Method Post -Headers $headers -ContentType application/json -Body $body

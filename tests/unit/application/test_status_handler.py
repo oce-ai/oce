@@ -11,9 +11,16 @@ from oce.application.queries.status import (
     FindMissingQueryHandler,
     OverviewContextQuery,
     OverviewContextQueryHandler,
+    ResolveScopeQuery,
+    ResolveScopeQueryHandler,
 )
 from oce.domain.blob.blob import Blob, BlobStatus
 from oce.domain.chain.chain import Chain
+from oce.shared.errors import (
+    InvalidCheckpointTokenError,
+    NeedsResetError,
+    ScopeRequiredError,
+)
 
 from tests.unit.application.fakes import FakeUnitOfWorkFactory, blob_name
 
@@ -125,12 +132,61 @@ async def test_overview_context_returns_key_docs_and_bounded_paths(repos):
     assert result.key_docs[0].truncated is True
 
 
-async def test_resolve_scope_without_client_scope_returns_none(repos):
-    from oce.application.queries.status import ResolveScopeQuery, ResolveScopeQueryHandler
+class TestResolveScopeQueryHandler:
+    """检索范围解析：全库检索已禁用，必须正面声明工作集。"""
 
-    factory, _, _ = repos
-    result = await ResolveScopeQueryHandler(factory).handle(ResolveScopeQuery())
+    async def test_without_client_scope_raises(self, repos):
+        factory, _, _ = repos
+        with pytest.raises(ScopeRequiredError):
+            await ResolveScopeQueryHandler(factory).handle(ResolveScopeQuery())
 
-    # 无 checkpoint、无 added blobs = 客户端未给范围 → None（不过滤，检索全库）；
-    # 空 frozenset 会被 pipeline 当成"无可搜内容"直接返回 []，语义相反。
-    assert result.blob_names is None
+    async def test_deleted_without_positive_scope_raises(self, repos):
+        # deleted_blobs 只是减法，不构成工作集声明
+        factory, _, _ = repos
+        with pytest.raises(ScopeRequiredError):
+            await ResolveScopeQueryHandler(factory).handle(
+                ResolveScopeQuery(deleted_blobs=("a",))
+            )
+
+    async def test_added_blobs_only_forms_scope(self, repos):
+        factory, _, _ = repos
+        result = await ResolveScopeQueryHandler(factory).handle(
+            ResolveScopeQuery(added_blobs=("a", "b"), deleted_blobs=("b",))
+        )
+        assert result.blob_names == frozenset({"a"})
+
+    async def test_malformed_token_raises_invalid(self, repos):
+        factory, _, _ = repos
+        with pytest.raises(InvalidCheckpointTokenError):
+            await ResolveScopeQueryHandler(factory).handle(
+                ResolveScopeQuery(checkpoint_id="bad-token")
+            )
+
+    async def test_missing_chain_raises_needs_reset(self, repos):
+        factory, _, _ = repos
+        ghost = f"{Chain.create(['x']).chain_id}:1"
+        with pytest.raises(NeedsResetError):
+            await ResolveScopeQueryHandler(factory).handle(
+                ResolveScopeQuery(checkpoint_id=ghost)
+            )
+
+    async def test_checkpoint_members_plus_increments(self, repos):
+        factory, _, chain_repo = repos
+        chain = await chain_repo.create(["a", "b"])
+        result = await ResolveScopeQueryHandler(factory).handle(
+            ResolveScopeQuery(
+                checkpoint_id=chain.get_checkpoint_token(),
+                added_blobs=("c",),
+                deleted_blobs=("b",),
+            )
+        )
+        assert result.blob_names == frozenset({"a", "c"})
+
+    async def test_empty_chain_is_empty_scope_not_error(self, repos):
+        # 有效但成员为空的 checkpoint → 空工作集（空结果），不算全库检索
+        factory, _, chain_repo = repos
+        chain = await chain_repo.create([])
+        result = await ResolveScopeQueryHandler(factory).handle(
+            ResolveScopeQuery(checkpoint_id=chain.get_checkpoint_token())
+        )
+        assert result.blob_names == frozenset()

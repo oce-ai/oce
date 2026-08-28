@@ -8,6 +8,11 @@ from oce.application.messages import Query
 from oce.application.uow import UnitOfWorkFactory
 from oce.domain.chain.chain import Chain
 from oce.domain.services.key_docs import match_key_docs, truncate_utf8_lines
+from oce.shared.errors import (
+    InvalidCheckpointTokenError,
+    NeedsResetError,
+    ScopeRequiredError,
+)
 
 
 @dataclass(frozen=True)
@@ -91,16 +96,28 @@ class ResolveScopeQueryHandler:
         self._uow_factory = uow_factory
 
     async def handle(self, query: ResolveScopeQuery) -> ResolveScopeResult:
+        """把 (checkpoint 成员 ∪ added) − deleted 解析为检索范围。
+
+        全库检索已禁用：客户端必须正面声明工作集。checkpoint_id 或 added_blobs 任一
+        有效即可；deleted_blobs 只是减法，不构成声明。checkpoint 无效（格式非法或链
+        不存在）直接报错，避免范围静默变窄。结果恒为非 None frozenset（可为空集），
+        空集表示工作集为空，检索返回空结果而非全库。
+        """
         base: set[str] = set()
         if query.checkpoint_id:
             parsed = Chain.parse_checkpoint_token(query.checkpoint_id)
-            if parsed is not None:
-                async with self._uow_factory() as uow:
-                    base = await uow.chains.get_members(parsed[0])
+            if parsed is None:
+                raise InvalidCheckpointTokenError(query.checkpoint_id)
+            chain_id = parsed[0]
+            async with self._uow_factory() as uow:
+                if not await uow.chains.exists(chain_id):
+                    raise NeedsResetError("checkpoint 链不存在（服务端状态丢失）")
+                base = await uow.chains.get_members(chain_id)
+        elif not query.added_blobs:
+            # 无 checkpoint 也无 added_blobs（deleted 不足以构成声明）→ 拒绝全库检索
+            raise ScopeRequiredError()
         scope = (base | set(query.added_blobs)) - set(query.deleted_blobs)
-        # If no scope specified (no valid checkpoint + no added blobs), return None = all blobs
-        # This ensures empty checkpoint_id="" doesn't filter to empty set
-        return ResolveScopeResult(frozenset(scope) if scope else None)
+        return ResolveScopeResult(frozenset(scope))
 
 
 @dataclass(frozen=True)

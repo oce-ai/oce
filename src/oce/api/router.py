@@ -25,7 +25,12 @@ from oce.api.schemas import (
 from oce.application.container import get_container
 from oce.application.service import BlobUpload, RetrievalApplication
 from oce.auth import verify_api_key
-from oce.shared.errors import InvalidCheckpointTokenError, NeedsResetError, ServiceNotReadyError
+from oce.shared.errors import (
+    InvalidCheckpointTokenError,
+    NeedsResetError,
+    ScopeRequiredError,
+    ServiceNotReadyError,
+)
 
 router = APIRouter(tags=["Retrieval"], dependencies=[Depends(verify_api_key)])
 
@@ -89,6 +94,10 @@ async def _retrieve(application: RetrievalApplication, request: CodebaseRetrieva
         )
     except ServiceNotReadyError as exc:
         raise _service_unavailable(exc) from exc
+    except (ScopeRequiredError, InvalidCheckpointTokenError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NeedsResetError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/agents/codebase-retrieval", response_model=CodebaseRetrievalResponse)
@@ -172,6 +181,10 @@ async def project_overview(
         )
     except ServiceNotReadyError as exc:
         raise _service_unavailable(exc) from exc
+    except (ScopeRequiredError, InvalidCheckpointTokenError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NeedsResetError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ProjectOverviewResponse(
         key_docs=[
             KeyDocSection(

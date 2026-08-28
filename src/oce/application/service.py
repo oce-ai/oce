@@ -14,7 +14,6 @@ from oce.application.commands.credentials import (
     ReloadEmbeddingCredentialsResult,
 )
 from oce.application.commands.ingest import (
-    DeleteBlobsCommand,
     EmbedPendingCommand,
     IngestBlobCommand,
     IngestBlobsCommand,
@@ -198,8 +197,8 @@ class RetrievalApplication:
         added: tuple[str, ...],
         deleted: tuple[str, ...],
     ) -> ResolveScopeResult:
-        if deleted:
-            await self._commands.execute(DeleteBlobsCommand(deleted))
+        # 查询路径对 deleted_blobs 无副作用：只做本次检索范围差集，不删除任何服务端
+        # 数据。物理清理由独立 GC 流程负责。
         if added and not self._background_indexing:
             await self._commands.execute(EmbedPendingCommand(added))
         return await self._queries.ask(ResolveScopeQuery(checkpoint_id, added, deleted))

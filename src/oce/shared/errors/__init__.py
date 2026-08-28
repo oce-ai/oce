@@ -52,3 +52,16 @@ class ServiceNotReadyError(ApplicationError):
 class NeedsResetError(ApplicationError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason, code="NEEDS_RESET")
+
+
+class ScopeRequiredError(ApplicationError):
+    """检索请求未声明工作集：必须提供 checkpoint_id 或 added_blobs。
+
+    全库检索被禁用（安全边界 + 防止跨工作集数据污染）。
+    """
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(
+            reason or "检索必须声明工作集：提供 checkpoint_id 或 added_blobs",
+            code="SCOPE_REQUIRED",
+        )

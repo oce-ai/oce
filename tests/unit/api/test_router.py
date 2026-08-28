@@ -12,6 +12,11 @@ from oce.application.service import BatchUploadResult, RetrievalResult
 from oce.auth import _unauthorized, verify_api_key
 from oce.domain.services.search import SearchHit
 from oce.main import app
+from oce.shared.errors import (
+    InvalidCheckpointTokenError,
+    NeedsResetError,
+    ScopeRequiredError,
+)
 
 
 class StubApplication:
@@ -184,6 +189,74 @@ async def test_nullable_blob_payload_is_normalized():
         )
     assert response.status_code == 200
     assert response.json()["checkpoint_not_found"] is False
+
+
+async def test_retrieval_rejects_empty_scope_with_400():
+    class ScopedApplication(StubApplication):
+        async def retrieve(self, information_request, **kwargs):
+            raise ScopeRequiredError()
+
+    app.dependency_overrides[get_application] = lambda: ScopedApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/agents/codebase-retrieval",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={"information_request": "entry point", "blobs": {}},
+        )
+    assert response.status_code == 400
+    assert "SCOPE_REQUIRED" in response.json()["detail"]
+
+
+async def test_retrieval_rejects_malformed_checkpoint_with_400():
+    class ScopedApplication(StubApplication):
+        async def retrieve(self, information_request, **kwargs):
+            raise InvalidCheckpointTokenError("bad-token")
+
+    app.dependency_overrides[get_application] = lambda: ScopedApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/agents/codebase-retrieval",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={"information_request": "entry point", "blobs": {}},
+        )
+    assert response.status_code == 400
+    assert "INVALID_CHECKPOINT_TOKEN" in response.json()["detail"]
+
+
+async def test_retrieval_reports_missing_chain_with_404():
+    class ScopedApplication(StubApplication):
+        async def retrieve(self, information_request, **kwargs):
+            raise NeedsResetError("checkpoint 链不存在（服务端状态丢失）")
+
+    app.dependency_overrides[get_application] = lambda: ScopedApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/agents/codebase-retrieval",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={"information_request": "entry point", "blobs": {}},
+        )
+    assert response.status_code == 404
+    assert "NEEDS_RESET" in response.json()["detail"]
+
+
+async def test_project_overview_rejects_empty_scope_with_400():
+    class ScopedApplication(StubApplication):
+        async def project_overview(self, **kwargs):
+            raise ScopeRequiredError()
+
+    app.dependency_overrides[get_application] = lambda: ScopedApplication()
+    app.dependency_overrides[verify_api_key] = mock_verify_api_key
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/agents/project-overview",
+            headers={"Authorization": "Bearer sk-dev"},
+            json={"blobs": {}, "depth": "basic"},
+        )
+    assert response.status_code == 400
+    assert "SCOPE_REQUIRED" in response.json()["detail"]
 
 
 async def test_project_overview_contract():

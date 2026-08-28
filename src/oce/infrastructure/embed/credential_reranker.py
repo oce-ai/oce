@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.domain.services.reranker import NoopReranker, Reranker
-from oce.infrastructure.embed.openai_reranker import OpenAIReranker
+from oce.infrastructure.embed.openai_reranker import OpenAIReranker, UsageCallback
 from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
 from oce.shared.config.settings import RerankSettings
 
@@ -23,6 +23,7 @@ class RerankRuntimeConfig:
     top_n: int
     min_score: float
     timeout_seconds: float
+    credential_id: int = 0
 
 
 class CredentialConfiguredReranker:
@@ -32,10 +33,12 @@ class CredentialConfiguredReranker:
         fallback: RerankSettings,
         *,
         fallback_embedding_key: str | None,
+        on_usage: UsageCallback | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._fallback = fallback
         self._fallback_embedding_key = fallback_embedding_key
+        self._on_usage = on_usage
         self._delegate: Reranker | None = None
         self._lock = asyncio.Lock()
         self._active_calls: dict[Reranker, int] = {}
@@ -103,6 +106,7 @@ class CredentialConfiguredReranker:
                 top_n=self._fallback.top_n,
                 min_score=self._fallback.min_score,
                 timeout_seconds=float(credential.timeout_seconds),
+                credential_id=credential.id,
             )
 
         key = (
@@ -121,8 +125,7 @@ class CredentialConfiguredReranker:
             timeout_seconds=self._fallback.timeout_seconds,
         )
 
-    @staticmethod
-    def _build_delegate(config: RerankRuntimeConfig | None) -> Reranker:
+    def _build_delegate(self, config: RerankRuntimeConfig | None) -> Reranker:
         if config is None:
             return NoopReranker()
         return OpenAIReranker(
@@ -132,6 +135,8 @@ class CredentialConfiguredReranker:
             top_n=config.top_n,
             min_score=config.min_score,
             timeout=config.timeout_seconds,
+            credential_id=config.credential_id,
+            on_usage=self._on_usage,
         )
 
     @staticmethod

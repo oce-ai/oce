@@ -9,7 +9,8 @@ from typing import Awaitable, Callable
 import httpx
 from openai import AsyncOpenAI
 
-UsageCallback = Callable[[int, str, int, int], Awaitable[None]]
+# 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)
+UsageCallback = Callable[[int, str, str, int, int], Awaitable[None]]
 
 
 class OpenAIEmbedder:
@@ -208,7 +209,8 @@ class OpenAIEmbedder:
             raise RuntimeError("Embedding response dimension mismatch")
         if self._on_usage is not None:
             tokens = int(getattr(response.usage, "total_tokens", 0) or 0)
-            await self._on_usage(self._credential_id, "embed", tokens, 0)
+            # embed 无 prompt/completion 之分：总量记入 prompt，completion=0
+            await self._on_usage(self._credential_id, "embed", self._model, tokens, 0)
         return vectors
 
     async def close(self) -> None:

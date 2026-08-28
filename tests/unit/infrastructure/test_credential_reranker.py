@@ -65,3 +65,47 @@ async def test_missing_rerank_key_uses_noop_delegate():
     assert await reranker.rerank("query", ["hit"]) == ["hit"]
     await reranker.close()
     await engine.dispose()
+
+
+async def test_credential_id_and_usage_callback_wired_through():
+    """DB 凭证的 id 填入 config，并把 credential_id + on_usage 透传给底层 delegate。"""
+    engine, sessions = await _runtime()
+    async with sessions() as session:
+        provider = EmbeddingProviderModel(
+            code="siliconflow",
+            display_name="SiliconFlow",
+            rerank_endpoint="https://database.test/v1/rerank",
+            rerank_model="database-reranker",
+        )
+        session.add(provider)
+        await session.flush()
+        credential = EmbeddingCredentialModel(
+            provider_id=provider.id,
+            name="primary",
+            api_key="database-key",
+            api_key_hash="rerank-hash",
+            priority=1,
+            timeout_seconds=45,
+        )
+        session.add(credential)
+        await session.commit()
+        credential_id = credential.id
+
+    async def _cb(*_args):
+        return None
+
+    reranker = CredentialConfiguredReranker(
+        sessions,
+        RerankSettings(api_key="fallback-key", enabled=True),
+        fallback_embedding_key=None,
+        on_usage=_cb,
+    )
+    config = await reranker._resolve_config()
+    assert config is not None
+    assert config.credential_id == credential_id
+
+    delegate = reranker._build_delegate(config)
+    assert delegate._credential_id == credential_id
+    assert delegate._on_usage is _cb
+    await delegate.close()
+    await engine.dispose()

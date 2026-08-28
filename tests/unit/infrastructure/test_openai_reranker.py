@@ -200,13 +200,13 @@ async def test_rerank_http_failure_returns_original_order():
 # ── on_usage 上报：成功路径触发 fire-and-forget 回调 ───────────────────────
 @pytest.mark.asyncio
 async def test_rerank_on_usage_callback_invoked_on_success():
-    """rerank 成功后调用 on_usage(cred_id, 'rerank', tokens, latency_ms)；usage 缺字段时 tokens=0。"""
+    """rerank 成功后调用 on_usage(cred_id, 'rerank', model, tokens, 0)；usage 缺字段时 tokens=0。"""
     import asyncio as _asyncio
 
     captured: list[tuple] = []
 
-    async def _on_usage(cid, kind, tokens, latency_ms):
-        captured.append((cid, kind, tokens, latency_ms))
+    async def _on_usage(cid, kind, model, prompt, completion):
+        captured.append((cid, kind, model, prompt, completion))
 
     fake_client = MagicMock(spec=httpx.AsyncClient)
     fake_client.post = AsyncMock(return_value=_fake_response({
@@ -222,9 +222,8 @@ async def test_rerank_on_usage_callback_invoked_on_success():
     await _asyncio.sleep(0)
     await _asyncio.sleep(0)
     assert captured, "on_usage 应至少被调用一次"
-    cid, kind, tokens, latency = captured[0]
-    assert (cid, kind, tokens) == (7, "rerank", 42)
-    assert latency >= 0
+    cid, kind, model, prompt, completion = captured[0]
+    assert (cid, kind, model, prompt, completion) == (7, "rerank", "qwen3-rerank", 42, 0)
 
 
 @pytest.mark.asyncio
@@ -233,8 +232,8 @@ async def test_rerank_on_usage_not_invoked_on_http_failure():
     import asyncio as _asyncio
     captured: list[tuple] = []
 
-    async def _on_usage(cid, kind, tokens, latency_ms):
-        captured.append((cid, kind, tokens, latency_ms))
+    async def _on_usage(cid, kind, model, prompt, completion):
+        captured.append((cid, kind, model, prompt, completion))
 
     fake_client = MagicMock(spec=httpx.AsyncClient)
     fake_client.post = AsyncMock(side_effect=httpx.ConnectError("down"))

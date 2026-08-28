@@ -95,3 +95,27 @@ def test_invalid_input_budget_is_rejected():
             max_batch_chars=4,
             max_input_chars=5,
         )
+
+
+@pytest.mark.asyncio
+async def test_embed_reports_usage_with_model_and_credential_id():
+    """embed 成功后按新签名回调 on_usage(credential_id, 'embed', model, total_tokens, 0)。"""
+    captured: list[tuple] = []
+
+    async def _on_usage(cid, kind, model, prompt, completion):
+        captured.append((cid, kind, model, prompt, completion))
+
+    client = _FakeClient()
+    embedder = OpenAIEmbedder(
+        client,
+        "test-model",
+        2,
+        max_concurrency=1,
+        credential_id=9,
+        on_usage=_on_usage,
+    )
+
+    await embedder.embed_query("abc")
+
+    # 假 client 的 usage.total_tokens = len("abc") = 3；embed 无 completion，记 0
+    assert captured == [(9, "embed", "test-model", 3, 0)]

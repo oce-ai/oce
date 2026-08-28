@@ -55,7 +55,7 @@ from oce.infrastructure.metrics.sql_metrics_sink import SqlMetricsSink
 from oce.infrastructure.queue.redis_queue import RedisQueue
 from oce.shared.config import get_settings
 from oce.shared.database.session import async_session_factory
-from oce.shared.metrics import NoopMetricsSink
+from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
 
 
 class _CredentialRuntime:
@@ -85,6 +85,11 @@ class Container:
         if settings.embedding.dimensions != settings.milvus.dense_dim:
             raise ValueError("EMBED_DIMENSIONS must equal MILVUS_DENSE_DIM")
 
+        # token 用量回调：监控开启时把 embedder/reranker/llm 的真实 usage 桥接到 sink，
+        # 关闭时传 None，采集侧 if 判空直接跳过（零开销）。
+        monitoring = settings.monitoring
+        token_usage_cb = self._record_token_usage if monitoring.enabled else None
+
         embedding_key = (
             settings.embedding.api_key.get_secret_value()
             if settings.embedding.api_key is not None
@@ -94,6 +99,7 @@ class Container:
             async_session_factory,
             settings.embedding,
             expected_dimensions=settings.milvus.dense_dim,
+            on_usage=token_usage_cb,
         )
         self.search_store = Milvus3SearchStore(settings.milvus)
         self.symbol_search_store = SymbolSearchStore(
@@ -106,6 +112,7 @@ class Container:
             async_session_factory,
             settings.rerank,
             fallback_embedding_key=embedding_key,
+            on_usage=token_usage_cb,
         )
         credential_runtime = _CredentialRuntime(self.embedder, self.reranker)
 
@@ -133,6 +140,7 @@ class Container:
                     base_url=settings.llm.base_url,
                     proxy=settings.llm.proxy,
                     tpm_limit=settings.llm.tpm_limit,
+                    on_usage=token_usage_cb,
                 )
                 logger.info("LLM client initialized for rerank/query rewrite")
             except Exception as e:
@@ -187,8 +195,7 @@ class Container:
         self.chunker = build_chunker()
         self._uow_factory = lambda: SqlAlchemyUnitOfWork(async_session_factory)
 
-        # 监控 sink：启用时异步落库，否则空实现
-        monitoring = settings.monitoring
+        # 监控 sink：启用时异步落库，否则空实现（monitoring 已在前面解析）
         if monitoring.enabled:
             self.metrics = SqlMetricsSink(
                 async_session_factory,
@@ -334,6 +341,33 @@ class Container:
             query_bus,
             background_indexing=self.queue is not None,
         )
+
+    async def _record_token_usage(
+        self,
+        credential_id: int,
+        kind: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> None:
+        """把 embedder/reranker/llm 的真实用量桥接到 sink。
+
+        credential_id=0（无凭证，如 LLM）归一为 None；旁路容错：任何异常只记日志，
+        绝不抛回主链路。
+        """
+        try:
+            self.metrics.record_token_usage(
+                TokenUsageRecord(
+                    kind=kind,
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                    credential_id=credential_id or None,
+                )
+            )
+        except Exception as exc:  # 监控旁路：绝不影响主链路
+            logger.warning("record token usage failed: {}", exc)
 
     async def close(self) -> None:
         if self.worker is not None:

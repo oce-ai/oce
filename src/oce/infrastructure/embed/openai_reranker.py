@@ -8,7 +8,8 @@ from typing import Any, Awaitable, Callable
 import httpx
 from loguru import logger
 
-UsageCallback = Callable[[int, str, int, int], Awaitable[None]]
+# 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)
+UsageCallback = Callable[[int, str, str, int, int], Awaitable[None]]
 
 
 class OpenAIReranker:
@@ -91,9 +92,11 @@ class OpenAIReranker:
                 int(token_meta.get(key, 0) or 0)
                 for key in ("input_tokens", "output_tokens", "image_tokens")
             )
+            # rerank 无 prompt/completion 之分：总量记入 prompt，completion=0
             await self._on_usage(
                 self._credential_id,
                 "rerank",
+                self._model,
                 tokens,
                 0,
             )

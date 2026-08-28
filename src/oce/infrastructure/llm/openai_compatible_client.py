@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Awaitable, Callable
 
 import httpx
 from loguru import logger
 
 from oce.infrastructure.llm.rate_limiter import TokenRateLimiter, estimate_tokens
+
+# 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)。
+# LLM 无 DB 凭证概念，credential_id 恒传 0（sink 侧归一为 None）。
+UsageCallback = Callable[[int, str, str, int, int], Awaitable[None]]
 
 # 输出 token 也计入 TPM。rerank 只回编号（实测约 34 token），按此量级留余量，
 # 不按 max_tokens 记账，否则预算瞬间被 8000 占满。
@@ -44,15 +49,18 @@ class OpenAICompatibleLLMClient:
         timeout: float = 120.0,
         proxy: str | None = None,
         tpm_limit: int | None = None,
+        on_usage: UsageCallback | None = None,
     ):
         """
         Args:
             tpm_limit: 接口 TPM 上限。给定时请求前排队，避免 429 让上层静默降级。
+            on_usage: 可选用量回调；每次成功 chat 后按真实 usage 上报，None 时零开销。
         """
         self.api_key = api_key
         self.base_url = base_url
         self.timeout = timeout
         self.proxy = proxy
+        self._on_usage = on_usage
         self._limiter = (
             TokenRateLimiter(tpm_limit) if tpm_limit and tpm_limit > 0 else None
         )
@@ -125,6 +133,13 @@ class OpenAICompatibleLLMClient:
 
                     # 提取响应内容
                     content = data["choices"][0]["message"]["content"]
+                    # 按真实 usage 上报（旁路，缺字段则跳过）；credential_id=0 表示无凭证
+                    if self._on_usage is not None:
+                        usage = data.get("usage") or {}
+                        prompt = int(usage.get("prompt_tokens", 0) or 0)
+                        completion = int(usage.get("completion_tokens", 0) or 0)
+                        if prompt or completion:
+                            await self._on_usage(0, "llm", model, prompt, completion)
                     return content
 
                 except httpx.HTTPStatusError as e:

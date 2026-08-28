@@ -9,7 +9,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder
+from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder, UsageCallback
 from oce.infrastructure.persistence.models import EmbeddingCredentialModel, EmbeddingProviderModel
 from oce.shared.config.settings import EmbeddingSettings
 from oce.shared.errors import ServiceNotReadyError
@@ -28,6 +28,7 @@ class EmbeddingRuntimeConfig:
     max_concurrency: int
     timeout_seconds: float
     proxy: str | None
+    credential_id: int = 0
 
 
 class CredentialConfiguredEmbedder:
@@ -39,10 +40,12 @@ class CredentialConfiguredEmbedder:
         fallback: EmbeddingSettings,
         *,
         expected_dimensions: int,
+        on_usage: UsageCallback | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._fallback = fallback
         self._expected_dimensions = expected_dimensions
+        self._on_usage = on_usage
         self._delegate: OpenAIEmbedder | None = None
         self._lock = asyncio.Lock()
         self._active_calls: dict[OpenAIEmbedder, int] = {}
@@ -85,8 +88,7 @@ class CredentialConfiguredEmbedder:
         if close_delegate:
             await delegate.close()
 
-    @staticmethod
-    def _build_delegate(config: EmbeddingRuntimeConfig) -> OpenAIEmbedder:
+    def _build_delegate(self, config: EmbeddingRuntimeConfig) -> OpenAIEmbedder:
         return OpenAIEmbedder.from_endpoint(
             endpoint=config.endpoint,
             api_key=config.api_key,
@@ -99,6 +101,8 @@ class CredentialConfiguredEmbedder:
             max_concurrency=config.max_concurrency,
             timeout=config.timeout_seconds,
             proxy=config.proxy,
+            credential_id=config.credential_id,
+            on_usage=self._on_usage,
         )
 
     async def _resolve_config(self) -> EmbeddingRuntimeConfig:
@@ -165,6 +169,7 @@ class CredentialConfiguredEmbedder:
                 max_concurrency=self._fallback.max_concurrency,
                 timeout_seconds=float(credential.timeout_seconds),
                 proxy=self._fallback.proxy,
+                credential_id=credential.id,
             )
 
         if config.dimensions != self._expected_dimensions:

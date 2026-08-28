@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from oce import __version__
 from oce.api.admin_router import admin_router
@@ -52,6 +53,24 @@ app = FastAPI(
     description="Self-hosted codebase context engine with ACE-compatible APIs.",
     lifespan=lifespan,
 )
+
+
+def _parse_cors_origins(value: str) -> list[str]:
+    """Normalize the comma-separated allowlist used by the static admin client."""
+    return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+
+
+cors_origins = _parse_cors_origins(get_settings().cors_origins)
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        max_age=600,
+    )
+
 app.include_router(router)
 app.include_router(admin_router)
 

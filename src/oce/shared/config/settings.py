@@ -326,6 +326,10 @@ class Settings(BaseSettings):
         default="",
         description="Admin 接口密钥；空则回落 API_KEY，一旦配置则 admin 接口只认此 key",
     )
+    cors_origins: str = Field(
+        default="",
+        description="允许访问 API 的浏览器来源，多个来源用逗号分隔；为空时关闭 CORS",
+    )
 
     # 子配置组
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)

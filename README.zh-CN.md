@@ -120,6 +120,10 @@ SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`ma
 
 除 `GET /health` 外，所有端点都需要 `Authorization: Bearer <API_KEY>`。
 
+如果使用单独的 `oce-admin` GitHub Pages 面板，需要在后端配置
+`CORS_ORIGINS=https://<你的 GitHub 用户名>.github.io`（自定义域名也可以，多个来源用逗号分隔）。
+默认不允许浏览器跨域调用；admin key 仅保存在面板浏览器的本地存储中，不要写入仓库或 URL。
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/find-missing` | 分类未知和待处理的 blob 哈希 |

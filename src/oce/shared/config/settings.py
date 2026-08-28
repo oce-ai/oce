@@ -296,6 +296,9 @@ class MonitoringSettings(BaseSettings):
     retention_days: int = Field(
         default=30, ge=1, description="监控数据保留天数（GC 清理阈值）"
     )
+    cleanup_interval_seconds: float = Field(
+        default=3600.0, gt=0, description="监控数据清理任务运行间隔秒数"
+    )
     retrieval_audit_enabled: bool = Field(
         default=True, description="是否记录检索各阶段耗时与空回审计"
     )

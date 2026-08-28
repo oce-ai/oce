@@ -52,6 +52,7 @@ from oce.infrastructure.milvus3 import Milvus3SearchStore
 from oce.infrastructure.milvus3.path_index import PathIndexClient
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
+from oce.infrastructure.metrics.cleanup import MonitoringCleaner
 from oce.infrastructure.metrics.resource_sampler import (
     ResourceSampler,
     build_psutil_collector,
@@ -220,6 +221,16 @@ class Container:
             )
         else:
             self.resource_sampler = None
+
+        # 监控数据清理：监控开启时按 retention_days 周期清过期行（GC 另作独立流程）
+        if monitoring.enabled:
+            self.monitoring_cleaner = MonitoringCleaner(
+                async_session_factory,
+                retention_days=monitoring.retention_days,
+                interval_seconds=monitoring.cleanup_interval_seconds,
+            )
+        else:
+            self.monitoring_cleaner = None
 
         # 初始化 Redis 队列和 Worker（可选）
         self.queue = None
@@ -390,6 +401,8 @@ class Container:
             await self.worker.stop()
         if self.resource_sampler is not None:
             await self.resource_sampler.stop()
+        if self.monitoring_cleaner is not None:
+            await self.monitoring_cleaner.stop()
         await self.metrics.stop()
         await self.search_store.close()
         await self.embedder.close()

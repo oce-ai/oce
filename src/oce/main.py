@@ -35,6 +35,8 @@ async def lifespan(app: FastAPI):
     await container.metrics.start()
     if container.resource_sampler is not None:
         await container.resource_sampler.start()
+    if container.monitoring_cleaner is not None:
+        await container.monitoring_cleaner.start()
     yield
     # 关闭时停止 worker + 清理资源
     if get_container.cache_info().currsize:

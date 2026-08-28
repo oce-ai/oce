@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
-import importlib
+from pathlib import Path
 
+import oce
 import pytest
 from sqlalchemy import create_engine, inspect, text
 
 
+_SCRIPT_LOCATION = Path(oce.__file__).resolve().parent / "alembic"
+
+
 def _head_revision() -> str:
-    """迁移链最顶层的 revision（importlib 因文件名以数字开头无法直接导入）。"""
-    module = importlib.import_module(
-        "oce.alembic.versions.2eebb4028c7f_add_symbol_occurrences_table"
-    )
-    return module.revision
+    """动态读取迁移链 head，避免每新增一个迁移都要改测试硬编码。"""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(_SCRIPT_LOCATION))
+    return ScriptDirectory.from_config(cfg).get_current_head()
 
 
 @pytest.fixture
@@ -48,6 +54,13 @@ def test_run_migrations_creates_head_schema(sqlite_url: str) -> None:
         engine.dispose()
 
     assert {"blobs", "chunks", "blob_chunks", "symbol_occurrences"}.issubset(tables)
+    # 监控迁移链（含检索审计）也应被建出
+    assert {
+        "api_call_metrics",
+        "token_usage_metrics",
+        "resource_samples",
+        "retrieval_metrics",
+    }.issubset(tables)
     assert version == _head_revision()
 
 

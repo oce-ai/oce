@@ -151,7 +151,7 @@ class RetrievalApplication:
         deleted = tuple(deleted_blobs or ())
         scope = await self._prepare_scope(checkpoint_id, added, deleted)
         result = await self._queries.ask(
-            SearchQuery(information_request, scope.blob_names)
+            SearchQuery(information_request, scope.blob_names, source="retrieval")
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         return RetrievalResult(
@@ -178,7 +178,9 @@ class RetrievalApplication:
 
         async def run(query: str) -> ProjectOverviewSection:
             try:
-                result = await self._queries.ask(SearchQuery(query, scope.blob_names))
+                result = await self._queries.ask(
+                    SearchQuery(query, scope.blob_names, source="overview")
+                )
                 return ProjectOverviewSection(
                     query=query,
                     formatted_retrieval=format_retrieval(result.hits),

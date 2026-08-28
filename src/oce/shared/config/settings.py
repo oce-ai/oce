@@ -273,6 +273,37 @@ class LogSettings(BaseSettings):
     level: str = Field(default="INFO", description="日志级别（WARNING/INFO/DEBUG）")
 
 
+class MonitoringSettings(BaseSettings):
+    """监控配置（调用 / token / 资源采集与落库）"""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MONITORING_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(default=True, description="是否启用监控采集与落库")
+    flush_interval_seconds: float = Field(
+        default=5.0, gt=0, description="缓冲区批量写库间隔秒数"
+    )
+    flush_max_buffer: int = Field(
+        default=500, ge=1, description="单类指标缓冲上限，超出立即 flush"
+    )
+    resource_sample_interval_seconds: float = Field(
+        default=60.0, gt=0, description="资源采样间隔秒数"
+    )
+    retention_days: int = Field(
+        default=30, ge=1, description="监控数据保留天数（GC 清理阈值）"
+    )
+    retrieval_audit_enabled: bool = Field(
+        default=True, description="是否记录检索各阶段耗时与空回审计"
+    )
+    store_query_text: bool = Field(
+        default=False, description="检索审计是否存储 query 原文（默认关，隐私安全）"
+    )
+
+
 class Settings(BaseSettings):
     """全局配置 - 聚合所有配置组"""
 
@@ -296,6 +327,7 @@ class Settings(BaseSettings):
     redis: RedisSettings = Field(default_factory=RedisSettings)
     worker: WorkerSettings = Field(default_factory=WorkerSettings)
     log: LogSettings = Field(default_factory=LogSettings)
+    monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
 
 @lru_cache
 def get_settings() -> Settings:

@@ -51,9 +51,11 @@ from oce.infrastructure.milvus3 import Milvus3SearchStore
 from oce.infrastructure.milvus3.path_index import PathIndexClient
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.infrastructure.persistence.uow import SqlAlchemyUnitOfWork
+from oce.infrastructure.metrics.sql_metrics_sink import SqlMetricsSink
 from oce.infrastructure.queue.redis_queue import RedisQueue
 from oce.shared.config import get_settings
 from oce.shared.database.session import async_session_factory
+from oce.shared.metrics import NoopMetricsSink
 
 
 class _CredentialRuntime:
@@ -185,6 +187,17 @@ class Container:
         self.chunker = build_chunker()
         self._uow_factory = lambda: SqlAlchemyUnitOfWork(async_session_factory)
 
+        # 监控 sink：启用时异步落库，否则空实现
+        monitoring = settings.monitoring
+        if monitoring.enabled:
+            self.metrics = SqlMetricsSink(
+                async_session_factory,
+                flush_interval_seconds=monitoring.flush_interval_seconds,
+                max_buffer=monitoring.flush_max_buffer,
+            )
+        else:
+            self.metrics = NoopMetricsSink()
+
         # 初始化 Redis 队列和 Worker（可选）
         self.queue = None
         self.worker = None
@@ -298,7 +311,12 @@ class Container:
                     exact_store=self.symbol_search_store,
                     intent_classifier=self.intent_classifier,
                     settings=settings.retrieval,
-                )
+                ),
+                metrics=self.metrics,
+                retrieval_audit_enabled=(
+                    monitoring.enabled and monitoring.retrieval_audit_enabled
+                ),
+                store_query_text=monitoring.store_query_text,
             ),
         )
         query_bus.register(FindMissingQuery, FindMissingQueryHandler(self._uow_factory))
@@ -320,6 +338,7 @@ class Container:
     async def close(self) -> None:
         if self.worker is not None:
             await self.worker.stop()
+        await self.metrics.stop()
         await self.search_store.close()
         await self.embedder.close()
         await self.reranker.close()

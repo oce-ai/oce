@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -218,4 +219,107 @@ class SymbolOccurrenceModel(Base):
         Index("idx_so_identifier_kind", "identifier", "kind"),
         Index("idx_so_content_hash", "content_hash"),
         UniqueConstraint("identifier", "blob_name", "content_hash", "kind", name="uq_symbol_occurrences_key"),
+    )
+
+
+class ApiCallMetricModel(Base):
+    """每次 HTTP 请求一行：调用次数/耗时/状态码的事件明细。"""
+
+    __tablename__ = "api_call_metrics"
+
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    endpoint = Column(String(128), nullable=False)
+    method = Column(String(8), nullable=False)
+    status_code = Column(Integer, nullable=False)
+    latency_ms = Column(Integer, nullable=False)
+    error_type = Column(String(64))
+
+    __table_args__ = (
+        Index("ix_api_call_metrics_ts", "ts"),
+        Index("ix_api_call_metrics_endpoint", "endpoint"),
+    )
+
+
+class TokenUsageMetricModel(Base):
+    """每次外部模型调用一行：embed/rerank/rewrite/intent 的 token 消耗明细。"""
+
+    __tablename__ = "token_usage_metrics"
+
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    kind = Column(String(16), nullable=False)
+    model = Column(String(128), nullable=False)
+    credential_id = Column(Integer)
+    prompt_tokens = Column(Integer, nullable=False, server_default="0")
+    completion_tokens = Column(Integer, nullable=False, server_default="0")
+    total_tokens = Column(Integer, nullable=False, server_default="0")
+
+    __table_args__ = (
+        Index("ix_token_usage_metrics_ts", "ts"),
+        Index("ix_token_usage_metrics_kind", "kind"),
+        Index("ix_token_usage_metrics_credential_id", "credential_id"),
+    )
+
+
+class ResourceSampleModel(Base):
+    """周期采样一行：磁盘/内存/CPU 的瞬时占用。"""
+
+    __tablename__ = "resource_samples"
+
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    disk_data_bytes = Column(BigInteger, nullable=False)
+    disk_free_bytes = Column(BigInteger, nullable=False)
+    disk_total_bytes = Column(BigInteger, nullable=False)
+    mem_rss_bytes = Column(BigInteger, nullable=False)
+    mem_percent = Column(Float, nullable=False)
+    cpu_percent = Column(Float, nullable=False)
+
+    __table_args__ = (Index("ix_resource_samples_ts", "ts"),)
+
+
+class RetrievalMetricModel(Base):
+    """一次检索的阶段耗时与结果审计。hit_count=0 即空回；source 区分真实检索与 overview 子查询。"""
+
+    __tablename__ = "retrieval_metrics"
+
+    id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    source = Column(String(32), nullable=False)
+    scope_size = Column(Integer, nullable=True)
+    hit_count = Column(Integer, nullable=False)
+    total_ms = Column(Integer, nullable=False)
+    intent = Column(String(32), nullable=True)
+    path_boosted = Column(Boolean, nullable=False, server_default="false")
+    query_text = Column(Text, nullable=True)
+    intent_ms = Column(Integer, nullable=True)
+    rewrite_ms = Column(Integer, nullable=True)
+    dense_ms = Column(Integer, nullable=True)
+    exact_ms = Column(Integer, nullable=True)
+    fuse_ms = Column(Integer, nullable=True)
+    rerank_ms = Column(Integer, nullable=True)
+    llm_rerank_ms = Column(Integer, nullable=True)
+    select_ms = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_retrieval_metrics_ts", "ts"),
+        Index("ix_retrieval_metrics_source", "source"),
+        Index("ix_retrieval_metrics_hit_count", "hit_count"),
     )

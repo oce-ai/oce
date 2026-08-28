@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import contextmanager
 from dataclasses import replace
-from typing import Callable
+from typing import Callable, Iterator
 
 from loguru import logger
 
@@ -35,12 +36,19 @@ from oce.domain.services.selector.coverage_selector import CoverageSelector
 from oce.domain.services.selector.protocols import Selector
 from oce.shared.config import get_settings
 from oce.shared.config.settings import RetrievalSettings
+from oce.shared.metrics import RetrievalAudit
 
 # LLM reranker (optional)
 try:
     from oce.domain.services.llm.reranker import LLMReranker
 except ImportError:
     LLMReranker = None  # type: ignore
+
+
+@contextmanager
+def _noop_stage(_name: str) -> Iterator[None]:
+    """audit=None 时的空计时上下文：不测量、零副作用。"""
+    yield
 
 
 def source_priority_factor(path: str) -> float:
@@ -129,7 +137,13 @@ class RetrievalPipeline:
             overlap_threshold=self.settings.overlap_threshold,
         )
 
-    async def search(self, query: str, allowed_blob_names: frozenset[str] | None = None) -> list[SearchHit]:
+    async def search(
+        self,
+        query: str,
+        allowed_blob_names: frozenset[str] | None = None,
+        *,
+        audit: RetrievalAudit | None = None,
+    ) -> list[SearchHit]:
         """执行一次检索，返回最终命中列表（按融合分降序）。
 
         Args:
@@ -137,7 +151,14 @@ class RetrievalPipeline:
             allowed_blob_names: 允许搜索的 blob 名称集合
                 - None: 搜索所有 blobs（不过滤）
                 - 空集合: 没有可搜索的 blobs（返回空结果）
+            audit: 可选的阶段耗时收集容器；为 None 时不打点、零开销。
         """
+        stage = audit.stage if audit is not None else _noop_stage
+        if audit is not None:
+            audit.scope_size = (
+                len(allowed_blob_names) if allowed_blob_names is not None else None
+            )
+
         # None 表示不过滤，空集合表示无可搜索内容
         if allowed_blob_names is not None and len(allowed_blob_names) == 0:
             return []
@@ -146,9 +167,12 @@ class RetrievalPipeline:
         strategy = None
         detected_intent = None
         if self.intent_classifier is not None:
-            detected_intent = await self.intent_classifier.classify(query)
+            with stage("intent"):
+                detected_intent = await self.intent_classifier.classify(query)
             strategy = get_strategy(detected_intent)
             logger.debug(f"Query intent: {detected_intent.value}, strategy: {strategy}")
+        if audit is not None and detected_intent is not None:
+            audit.intent = detected_intent.value
 
         # 路径索引增强：根据意图或启发式判断
         use_path_index = (
@@ -156,6 +180,8 @@ class RetrievalPipeline:
             or (self.path_store and should_use_path_index(query))
         )
         if use_path_index and self.path_store:
+            if audit is not None:
+                audit.path_boosted = True
             return await self._search_with_path_boost(
                 query,
                 allowed_blob_names,
@@ -169,6 +195,7 @@ class RetrievalPipeline:
                     if strategy is not None
                     else self.llm_reranker is not None
                 ),
+                audit=audit,
             )
 
         # Query rewrite: 根据意图决定是否启用
@@ -178,33 +205,38 @@ class RetrievalPipeline:
             or (strategy is None and self.query_rewriter is not None)
         )
         if use_query_rewrite and self.query_rewriter is not None:
-            rewritten_queries = await self.query_rewriter.rewrite(query)
+            with stage("rewrite"):
+                rewritten_queries = await self.query_rewriter.rewrite(query)
             # 使用改写的查询替换原查询
             if rewritten_queries:
                 queries_to_search = rewritten_queries
 
         # 对每个查询执行完整检索流程
         all_result_lists = []
-        for search_query in queries_to_search:
-            planned_queries = self.query_planner.plan(search_query)
-            if not planned_queries:
-                continue
-            num_queries = len(planned_queries)
-            result_lists = await asyncio.gather(
-                *(
-                    self._recall(planned_query, allowed_blob_names, num_queries)
-                    for planned_query in planned_queries
+        with stage("dense"):
+            for search_query in queries_to_search:
+                planned_queries = self.query_planner.plan(search_query)
+                if not planned_queries:
+                    continue
+                num_queries = len(planned_queries)
+                result_lists = await asyncio.gather(
+                    *(
+                        self._recall(planned_query, allowed_blob_names, num_queries)
+                        for planned_query in planned_queries
+                    )
                 )
-            )
-            all_result_lists.extend(result_lists)
+                all_result_lists.extend(result_lists)
 
-        exact_hits = await self._recall_exact(query, allowed_blob_names)
+        with stage("exact"):
+            exact_hits = await self._recall_exact(query, allowed_blob_names)
         if not all_result_lists and not exact_hits:
             return []
 
-        hits = self._fuse(all_result_lists) if all_result_lists else []
-        hits = self._merge_exact_hits(query, exact_hits, hits)
-        hits = await self.reranker.rerank(query, hits)
+        with stage("fuse"):
+            hits = self._fuse(all_result_lists) if all_result_lists else []
+            hits = self._merge_exact_hits(query, exact_hits, hits)
+        with stage("rerank"):
+            hits = await self.reranker.rerank(query, hits)
         hits = self._apply_source_priority(hits)
 
         # LLM-based semantic rerank: 根据意图决定是否启用
@@ -213,11 +245,14 @@ class RetrievalPipeline:
             or (strategy is None and self.llm_reranker is not None)
         )
         if use_llm_rerank:
-            hits = await self._llm_rerank_hits(query, hits)
+            with stage("llm_rerank"):
+                hits = await self._llm_rerank_hits(query, hits)
         hits = self._promote_symbol_endpoints(query, hits)
 
-        hits = self._apply_confidence_floor(hits)
-        return await self.selector.select(hits, self.settings.final_select_k)
+        with stage("select"):
+            hits = self._apply_confidence_floor(hits)
+            selected = await self.selector.select(hits, self.settings.final_select_k)
+        return selected
 
     async def _llm_rerank_hits(
         self, query: str, hits: list[SearchHit]
@@ -457,6 +492,7 @@ class RetrievalPipeline:
         *,
         enable_query_rewrite: bool,
         enable_llm_rerank: bool,
+        audit: RetrievalAudit | None = None,
     ) -> list[SearchHit]:
         """
         使用路径索引增强的检索（用于文件名查询）
@@ -466,78 +502,87 @@ class RetrievalPipeline:
         符号的 chunk 挤掉（回填的文件首个 chunk 通常只是 use / import 语句）。
         """
         logger.info(f"Path-boosted search for query: {query}")
+        stage = audit.stage if audit is not None else _noop_stage
 
         # 0. 查询改写变体（路径索引与内容索引共用，解决中文查询 vs 英文文件名）
         queries_to_search = [query]
         if enable_query_rewrite and self.query_rewriter is not None:
-            try:
-                rewritten_queries = await self.query_rewriter.rewrite(query)
-                if rewritten_queries:
-                    queries_to_search = rewritten_queries
-            except Exception as e:
-                logger.warning(f"Query rewrite failed: {e}")
+            with stage("rewrite"):
+                try:
+                    rewritten_queries = await self.query_rewriter.rewrite(query)
+                    if rewritten_queries:
+                        queries_to_search = rewritten_queries
+                except Exception as e:
+                    logger.warning(f"Query rewrite failed: {e}")
 
         # 1. 路径索引检索：原查询 + 改写变体分别检索，每个 blob 取最高路径分。
         #    中文查询（如「版本变更历史记录文件在哪里」）直接 embedding 常匹配不到
         #    英文路径文档，改写变体（含文件名如 CHANGES.rst）才能命中路径索引。
         path_scores: dict[str, float] = {}
-        try:
-            blob_filter = list(allowed_blob_names) if allowed_blob_names else None
-            for variant in [query, *queries_to_search]:
-                query_vector = await self.embedder.embed_query(variant)
-                path_results = await self.path_store.search_paths(
-                    query_vector=query_vector,
-                    allowed_blob_names=blob_filter,
-                    top_k=20,
-                )
-                for r in path_results:
-                    if r.blob_name not in path_scores or r.score > path_scores[r.blob_name]:
-                        path_scores[r.blob_name] = r.score
-            logger.info(f"Path index returned {len(path_scores)} results")
-        except Exception as e:
-            logger.warning(f"Path index search failed: {e}, falling back to content-only")
+        with stage("dense"):
+            try:
+                blob_filter = list(allowed_blob_names) if allowed_blob_names else None
+                for variant in [query, *queries_to_search]:
+                    query_vector = await self.embedder.embed_query(variant)
+                    path_results = await self.path_store.search_paths(
+                        query_vector=query_vector,
+                        allowed_blob_names=blob_filter,
+                        top_k=20,
+                    )
+                    for r in path_results:
+                        if r.blob_name not in path_scores or r.score > path_scores[r.blob_name]:
+                            path_scores[r.blob_name] = r.score
+                logger.info(f"Path index returned {len(path_scores)} results")
+            except Exception as e:
+                logger.warning(f"Path index search failed: {e}, falling back to content-only")
 
         # 2. 内容索引检索（常规流程，但减少 top_k）
         content_hits = []
-        try:
-            all_result_lists = []
-            for search_query in queries_to_search:
-                planned_queries = self.query_planner.plan(search_query)
-                if not planned_queries:
-                    continue
-                num_queries = len(planned_queries)
-                result_lists = await asyncio.gather(
-                    *(
-                        self._recall(planned_query, allowed_blob_names, num_queries)
-                        for planned_query in planned_queries
+        with stage("dense"):
+            try:
+                all_result_lists = []
+                for search_query in queries_to_search:
+                    planned_queries = self.query_planner.plan(search_query)
+                    if not planned_queries:
+                        continue
+                    num_queries = len(planned_queries)
+                    result_lists = await asyncio.gather(
+                        *(
+                            self._recall(planned_query, allowed_blob_names, num_queries)
+                            for planned_query in planned_queries
+                        )
                     )
-                )
-                all_result_lists.extend(result_lists)
+                    all_result_lists.extend(result_lists)
 
-            if all_result_lists:
-                content_hits = self._fuse(all_result_lists)
-        except Exception as e:
-            logger.warning(f"Content search failed: {e}")
+                if all_result_lists:
+                    content_hits = self._fuse(all_result_lists)
+            except Exception as e:
+                logger.warning(f"Content search failed: {e}")
 
         # 3. 融合：路径分数作为文件级加权，排序仍在 chunk 粒度上进行
-        if not path_scores:
-            # 路径索引失败，回退到纯内容检索
-            logger.info("No path results, using content-only")
-            hits = content_hits
-        else:
-            hits = await self._merge_path_and_content(path_scores, content_hits)
+        with stage("fuse"):
+            if not path_scores:
+                # 路径索引失败，回退到纯内容检索
+                logger.info("No path results, using content-only")
+                hits = content_hits
+            else:
+                hits = await self._merge_path_and_content(path_scores, content_hits)
 
         # 4. 应用常规后处理
-        hits = await self.reranker.rerank(query, hits)
+        with stage("rerank"):
+            hits = await self.reranker.rerank(query, hits)
         # 路径类查询使用文档中立的优先级因子（不降权 .rst/.md/.txt）
         # 避免「版本变更历史文件在哪里」被 .rst 文档降权压出 Top-10
         hits = self._apply_source_priority(hits, priority_factor=path_query_priority_factor)
 
         if enable_llm_rerank:
-            hits = await self._llm_rerank_hits(query, hits)
+            with stage("llm_rerank"):
+                hits = await self._llm_rerank_hits(query, hits)
 
-        hits = self._apply_confidence_floor(hits, priority_factor=path_query_priority_factor)
-        return await self.selector.select(hits, self.settings.final_select_k)
+        with stage("select"):
+            hits = self._apply_confidence_floor(hits, priority_factor=path_query_priority_factor)
+            selected = await self.selector.select(hits, self.settings.final_select_k)
+        return selected
 
     async def _merge_path_and_content(
         self,

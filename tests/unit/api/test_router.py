@@ -103,6 +103,15 @@ async def test_health_does_not_require_authentication():
     assert response.json() == {"status": "ok"}
 
 
+async def test_version_is_public_and_reports_package_version():
+    from oce import __version__
+
+    async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
+        response = await client.get("/version")
+    assert response.status_code == 200
+    assert response.json() == {"name": "oce", "version": __version__}
+
+
 async def test_reload_embedding_credentials_contract():
     async with httpx.AsyncClient(transport=_transport(), base_url="http://test") as client:
         response = await client.post(

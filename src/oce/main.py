@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from oce import __version__
 from oce.api.admin_router import admin_router
 from oce.api.middleware import ApiCallMetricsMiddleware
 from oce.api.router import router
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="OpenContextEngine",
-    version="0.1.0",
+    version=__version__,
     description="Self-hosted codebase context engine with ACE-compatible APIs.",
     lifespan=lifespan,
 )
@@ -69,3 +70,9 @@ if get_settings().monitoring.enabled:
 @app.get("/health", tags=["Meta"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/version", tags=["Meta"])
+async def version() -> dict[str, str]:
+    """服务端版本号，公开无需鉴权，供客户端做兼容性检查与升级提醒。"""
+    return {"name": "oce", "version": __version__}

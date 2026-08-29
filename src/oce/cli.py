@@ -63,7 +63,7 @@ EMBED_API_KEY=YOUR_EMBEDDING_API_KEY_HERE
 # EMBED_DIMENSIONS=1024
 
 # ==================== 可选：LLM 增强 ====================
-# 重排 / 意图分类默认开启，二者共用下面这个 LLM 客户端。
+# 重排 / 意图分类默认开启；可在 model_credentials 表按 kind 配置，未配置则用下面的 fallback。
 # LLM_API_KEY=your_llm_api_key_here
 # LLM_BASE_URL=https://openrouter.ai/api/v1
 # LLM_MODEL=inclusionai/ling-3.0-flash-fin:free

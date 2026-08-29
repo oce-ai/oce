@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.domain.services.reranker import NoopReranker, Reranker
 from oce.infrastructure.embed.openai_reranker import OpenAIReranker, UsageCallback
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel
+from oce.infrastructure.persistence.models import ModelCredentialModel
 from oce.shared.config.settings import RerankSettings
 
 
@@ -80,15 +80,16 @@ class CredentialConfiguredReranker:
             credential = (
                 (
                     await session.execute(
-                        select(EmbeddingCredentialModel)
+                        select(ModelCredentialModel)
                         .where(
-                            EmbeddingCredentialModel.status == "active",
-                            EmbeddingCredentialModel.rerank_endpoint.is_not(None),
-                            EmbeddingCredentialModel.rerank_model.is_not(None),
+                            ModelCredentialModel.kind == "rerank",
+                            ModelCredentialModel.status == "active",
+                            ModelCredentialModel.endpoint.is_not(None),
+                            ModelCredentialModel.model.is_not(None),
                         )
                         .order_by(
-                            EmbeddingCredentialModel.priority,
-                            EmbeddingCredentialModel.id,
+                            ModelCredentialModel.priority,
+                            ModelCredentialModel.id,
                         )
                         .limit(1)
                     )
@@ -99,11 +100,15 @@ class CredentialConfiguredReranker:
 
         if credential is not None:
             return RerankRuntimeConfig(
-                endpoint=credential.rerank_endpoint,
+                endpoint=credential.endpoint,
                 api_key=credential.api_key,
-                model=credential.rerank_model,
-                top_n=self._fallback.top_n,
-                min_score=self._fallback.min_score,
+                model=credential.model,
+                top_n=credential.top_n or self._fallback.top_n,
+                min_score=(
+                    credential.min_score
+                    if credential.min_score is not None
+                    else self._fallback.min_score
+                ),
                 timeout_seconds=float(credential.timeout_seconds),
                 credential_id=credential.id,
             )

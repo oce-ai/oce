@@ -15,53 +15,68 @@ from oce.application.credential_admin import (
     CredentialRecord,
     CredentialUpdate,
 )
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel
+from oce.infrastructure.persistence.models import ModelCredentialModel
 from oce.shared.errors import CredentialConflictError
 
-# CredentialUpdate 中可直接透传到模型的标量字段（api_key 单独处理以同步 hash）。
-_UPDATABLE_FIELDS = (
-    "name",
+# CredentialCreate/Update 中可直接透传到模型的标量字段（api_key 单独处理以同步 hash）。
+_SCALAR_FIELDS = (
+    "kind",
     "provider",
+    "name",
     "status",
     "priority",
-    "embed_endpoint",
-    "embed_model",
+    "endpoint",
+    "model",
+    "timeout_seconds",
+    "rate_limit",
+    "note",
     "dimensions",
     "max_batch_size",
     "max_batch_chars",
     "max_input_chars",
     "input_overlap_chars",
-    "rerank_endpoint",
-    "rerank_model",
-    "timeout_seconds",
-    "rate_limit",
-    "note",
+    "top_n",
+    "min_score",
+    "tpm_limit",
+    "max_candidates",
+    "output_top_k",
+    "snippet_chars",
+    "num_rewrites",
 )
+
+# update 场景不允许把 kind 之外的主键类字段清空为默认；name/kind 必填不可置 None。
+_UPDATABLE_FIELDS = _SCALAR_FIELDS
 
 
 def _hash_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
 
-def _to_record(model: EmbeddingCredentialModel) -> CredentialRecord:
+def _to_record(model: ModelCredentialModel) -> CredentialRecord:
     return CredentialRecord(
         id=model.id,
+        kind=model.kind,
         provider=model.provider,
         name=model.name,
         status=model.status,
         priority=model.priority,
-        embed_endpoint=model.embed_endpoint,
-        embed_model=model.embed_model,
+        endpoint=model.endpoint,
+        model=model.model,
+        timeout_seconds=model.timeout_seconds,
+        rate_limit=model.rate_limit,
+        note=model.note,
         dimensions=model.dimensions,
         max_batch_size=model.max_batch_size,
         max_batch_chars=model.max_batch_chars,
         max_input_chars=model.max_input_chars,
         input_overlap_chars=model.input_overlap_chars,
-        rerank_endpoint=model.rerank_endpoint,
-        rerank_model=model.rerank_model,
-        timeout_seconds=model.timeout_seconds,
-        rate_limit=model.rate_limit,
-        note=model.note,
+        top_n=model.top_n,
+        min_score=model.min_score,
+        tpm_limit=model.tpm_limit,
+        max_candidates=model.max_candidates,
+        output_top_k=model.output_top_k,
+        snippet_chars=model.snippet_chars,
+        num_rewrites=model.num_rewrites,
         api_key_last4=(model.api_key or "")[-4:],
         last_used_at=model.last_used_at,
         created_at=model.created_at,
@@ -77,34 +92,20 @@ class SqlCredentialAdminStore:
         async with self._session_factory() as session:
             rows = (
                 await session.execute(
-                    select(EmbeddingCredentialModel).order_by(
-                        EmbeddingCredentialModel.priority,
-                        EmbeddingCredentialModel.id,
+                    select(ModelCredentialModel).order_by(
+                        ModelCredentialModel.kind,
+                        ModelCredentialModel.priority,
+                        ModelCredentialModel.id,
                     )
                 )
             ).scalars().all()
             return [_to_record(row) for row in rows]
 
     async def create(self, data: CredentialCreate) -> CredentialRecord:
-        model = EmbeddingCredentialModel(
-            provider=data.provider,
-            name=data.name,
+        model = ModelCredentialModel(
             api_key=data.api_key,
             api_key_hash=_hash_key(data.api_key),
-            status=data.status,
-            priority=data.priority,
-            embed_endpoint=data.embed_endpoint,
-            embed_model=data.embed_model,
-            dimensions=data.dimensions,
-            max_batch_size=data.max_batch_size,
-            max_batch_chars=data.max_batch_chars,
-            max_input_chars=data.max_input_chars,
-            input_overlap_chars=data.input_overlap_chars,
-            rerank_endpoint=data.rerank_endpoint,
-            rerank_model=data.rerank_model,
-            timeout_seconds=data.timeout_seconds,
-            rate_limit=data.rate_limit,
-            note=data.note,
+            **{field: getattr(data, field) for field in _SCALAR_FIELDS},
         )
         return await self._persist_new(model)
 
@@ -112,7 +113,7 @@ class SqlCredentialAdminStore:
         self, credential_id: int, changes: CredentialUpdate
     ) -> CredentialRecord | None:
         async with self._session_factory() as session:
-            model = await session.get(EmbeddingCredentialModel, credential_id)
+            model = await session.get(ModelCredentialModel, credential_id)
             if model is None:
                 return None
             for field in _UPDATABLE_FIELDS:
@@ -133,7 +134,7 @@ class SqlCredentialAdminStore:
 
     async def delete(self, credential_id: int) -> bool:
         async with self._session_factory() as session:
-            model = await session.get(EmbeddingCredentialModel, credential_id)
+            model = await session.get(ModelCredentialModel, credential_id)
             if model is None:
                 return False
             await session.delete(model)
@@ -144,33 +145,23 @@ class SqlCredentialAdminStore:
         self, credential_id: int, *, name: str, api_key: str
     ) -> CredentialRecord | None:
         async with self._session_factory() as session:
-            src = await session.get(EmbeddingCredentialModel, credential_id)
+            src = await session.get(ModelCredentialModel, credential_id)
             if src is None:
                 return None
-            clone = EmbeddingCredentialModel(
-                provider=src.provider,
+            clone = ModelCredentialModel(
                 name=name,
                 api_key=api_key,
                 api_key_hash=_hash_key(api_key),
-                status=src.status,
-                priority=src.priority,
-                embed_endpoint=src.embed_endpoint,
-                embed_model=src.embed_model,
-                dimensions=src.dimensions,
-                max_batch_size=src.max_batch_size,
-                max_batch_chars=src.max_batch_chars,
-                max_input_chars=src.max_input_chars,
-                input_overlap_chars=src.input_overlap_chars,
-                rerank_endpoint=src.rerank_endpoint,
-                rerank_model=src.rerank_model,
-                timeout_seconds=src.timeout_seconds,
-                rate_limit=src.rate_limit,
-                note=src.note,
+                **{
+                    field: getattr(src, field)
+                    for field in _SCALAR_FIELDS
+                    if field != "name"
+                },
             )
         return await self._persist_new(clone)
 
     async def _persist_new(
-        self, model: EmbeddingCredentialModel
+        self, model: ModelCredentialModel
     ) -> CredentialRecord:
         async with self._session_factory() as session:
             session.add(model)

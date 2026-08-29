@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder, UsageCallback
-from oce.infrastructure.persistence.models import EmbeddingCredentialModel
+from oce.infrastructure.persistence.models import ModelCredentialModel
 from oce.shared.config.settings import EmbeddingSettings
 from oce.shared.errors import ServiceNotReadyError
 
@@ -110,15 +110,16 @@ class CredentialConfiguredEmbedder:
             credential = (
                 (
                     await session.execute(
-                        select(EmbeddingCredentialModel)
+                        select(ModelCredentialModel)
                         .where(
-                            EmbeddingCredentialModel.status == "active",
-                            EmbeddingCredentialModel.embed_endpoint.is_not(None),
-                            EmbeddingCredentialModel.embed_model.is_not(None),
+                            ModelCredentialModel.kind == "embed",
+                            ModelCredentialModel.status == "active",
+                            ModelCredentialModel.endpoint.is_not(None),
+                            ModelCredentialModel.model.is_not(None),
                         )
                         .order_by(
-                            EmbeddingCredentialModel.priority,
-                            EmbeddingCredentialModel.id,
+                            ModelCredentialModel.priority,
+                            ModelCredentialModel.id,
                         )
                         .limit(1)
                     )
@@ -151,18 +152,40 @@ class CredentialConfiguredEmbedder:
                 proxy=self._fallback.proxy,
             )
         else:
+            fb = self._fallback
+            # kind 专属参数列可能为空（如仅填 endpoint/model 的最简嵌入行），逐字段回落。
             config = EmbeddingRuntimeConfig(
-                endpoint=credential.embed_endpoint,
+                endpoint=credential.endpoint,
                 api_key=credential.api_key,
-                model=credential.embed_model,
-                dimensions=credential.dimensions,
-                max_batch_size=credential.max_batch_size,
-                max_batch_chars=credential.max_batch_chars,
-                max_input_chars=credential.max_input_chars,
-                input_overlap_chars=credential.input_overlap_chars,
-                max_concurrency=self._fallback.max_concurrency,
+                model=credential.model,
+                dimensions=(
+                    credential.dimensions
+                    if credential.dimensions is not None
+                    else fb.dimensions
+                ),
+                max_batch_size=(
+                    credential.max_batch_size
+                    if credential.max_batch_size is not None
+                    else fb.max_batch_size
+                ),
+                max_batch_chars=(
+                    credential.max_batch_chars
+                    if credential.max_batch_chars is not None
+                    else fb.max_batch_chars
+                ),
+                max_input_chars=(
+                    credential.max_input_chars
+                    if credential.max_input_chars is not None
+                    else fb.max_input_chars
+                ),
+                input_overlap_chars=(
+                    credential.input_overlap_chars
+                    if credential.input_overlap_chars is not None
+                    else fb.input_overlap_chars
+                ),
+                max_concurrency=fb.max_concurrency,
                 timeout_seconds=float(credential.timeout_seconds),
-                proxy=self._fallback.proxy,
+                proxy=fb.proxy,
                 credential_id=credential.id,
             )
 

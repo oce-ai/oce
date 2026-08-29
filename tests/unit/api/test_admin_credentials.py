@@ -22,22 +22,28 @@ async def _mock_admin_auth(authorization: str | None = Header(default=None)) -> 
 def _record(credential_id: int, name: str, *, last4: str = "1234", status: str = "active") -> CredentialRecord:
     return CredentialRecord(
         id=credential_id,
+        kind="embed",
         provider="siliconflow",
         name=name,
         status=status,
         priority=100,
-        embed_endpoint="https://example.test/v1/embeddings",
-        embed_model="embedding-model",
+        endpoint="https://example.test/v1/embeddings",
+        model="embedding-model",
+        timeout_seconds=30,
+        rate_limit=None,
+        note=None,
         dimensions=1024,
         max_batch_size=32,
         max_batch_chars=32_000,
         max_input_chars=8_000,
         input_overlap_chars=400,
-        rerank_endpoint=None,
-        rerank_model=None,
-        timeout_seconds=30,
-        rate_limit=None,
-        note=None,
+        top_n=None,
+        min_score=None,
+        tpm_limit=None,
+        max_candidates=None,
+        output_top_k=None,
+        snippet_chars=None,
+        num_rewrites=None,
         api_key_last4=last4,
         last_used_at=None,
         created_at=None,
@@ -90,7 +96,7 @@ async def test_create_credential_returns_201():
         response = await client.post(
             "/admin/credentials",
             headers=_AUTH,
-            json={"name": "n", "api_key": "sk-secret-8888"},
+            json={"kind": "embed", "name": "n", "api_key": "sk-secret-8888"},
         )
     assert response.status_code == 201
     assert response.json()["api_key_last4"] == "8888"
@@ -132,7 +138,7 @@ async def test_create_conflict_returns_409():
         response = await client.post(
             "/admin/credentials",
             headers=_AUTH,
-            json={"name": "n", "api_key": "sk-dup"},
+            json={"kind": "embed", "name": "n", "api_key": "sk-dup"},
         )
     assert response.status_code == 409
 

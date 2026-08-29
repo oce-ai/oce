@@ -25,11 +25,13 @@ async def _store():
 
 def _create(**overrides) -> CredentialCreate:
     data = dict(
+        kind="embed",
         name="primary",
         api_key="sk-secret-1234",
         provider="siliconflow",
-        embed_endpoint="https://example.test/v1/embeddings",
-        embed_model="embedding-model",
+        endpoint="https://example.test/v1/embeddings",
+        model="embedding-model",
+        dimensions=1024,
     )
     data.update(overrides)
     return CredentialCreate(**data)
@@ -83,14 +85,35 @@ async def test_delete_removes_row():
 
 async def test_duplicate_copies_channel_config():
     engine, store = await _store()
-    src = await store.create(_create(rerank_endpoint="https://r.test", rerank_model="rr"))
+    src = await store.create(
+        _create(kind="rerank", endpoint="https://r.test", model="rr")
+    )
     clone = await store.duplicate(src.id, name="secondary", api_key="sk-clone-5678")
     assert clone is not None
     assert clone.id != src.id
     assert clone.name == "secondary"
     assert clone.api_key_last4 == "5678"
-    assert clone.embed_endpoint == src.embed_endpoint
-    assert clone.rerank_endpoint == "https://r.test"
+    assert clone.kind == "rerank"
+    assert clone.endpoint == "https://r.test"
+    assert clone.model == "rr"
+    await engine.dispose()
+
+
+async def test_same_key_allowed_across_kinds():
+    engine, store = await _store()
+    await store.create(_create(kind="embed", api_key="sk-shared"))
+    # 唯一约束是 (kind, api_key_hash)：同一把 key 换 kind 不冲突。
+    record = await store.create(
+        _create(
+            kind="llm_rerank",
+            name="llm",
+            api_key="sk-shared",
+            endpoint="https://api.test/v1",
+            model="chat-model",
+        )
+    )
+    assert record.kind == "llm_rerank"
+    assert record.api_key_last4 == "ared"
     await engine.dispose()
 
 

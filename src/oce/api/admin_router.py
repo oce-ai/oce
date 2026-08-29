@@ -43,29 +43,8 @@ admin_router = APIRouter(
 
 
 def _credential_response(record: CredentialRecord) -> CredentialResponse:
-    return CredentialResponse(
-        id=record.id,
-        provider=record.provider,
-        name=record.name,
-        status=record.status,
-        priority=record.priority,
-        embed_endpoint=record.embed_endpoint,
-        embed_model=record.embed_model,
-        dimensions=record.dimensions,
-        max_batch_size=record.max_batch_size,
-        max_batch_chars=record.max_batch_chars,
-        max_input_chars=record.max_input_chars,
-        input_overlap_chars=record.input_overlap_chars,
-        rerank_endpoint=record.rerank_endpoint,
-        rerank_model=record.rerank_model,
-        timeout_seconds=record.timeout_seconds,
-        rate_limit=record.rate_limit,
-        note=record.note,
-        api_key_last4=record.api_key_last4,
-        last_used_at=record.last_used_at,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-    )
+    # CredentialResponse 字段与 CredentialRecord 同名（不含明文 api_key），按属性直接映射。
+    return CredentialResponse.model_validate(record, from_attributes=True)
 
 
 @admin_router.get("/credentials", response_model=CredentialListResponse)

@@ -15,25 +15,38 @@ from oce.application.messages import Command, Query
 
 @dataclass(frozen=True)
 class CredentialRecord:
-    """回给上层的凭据视图：不含明文 api_key，仅暴露尾 4 位。"""
+    """回给上层的凭据视图：不含明文 api_key，仅暴露尾 4 位。
+
+    kind ∈ embed | rerank | llm_rerank | query_rewrite | intent；endpoint/model 语义
+    随 kind 变化，kind 专属参数对其它 kind 恒为 None。
+    """
 
     id: int
+    kind: str
     provider: str | None
     name: str
     status: str
     priority: int
-    embed_endpoint: str | None
-    embed_model: str | None
-    dimensions: int
-    max_batch_size: int
-    max_batch_chars: int
-    max_input_chars: int
-    input_overlap_chars: int
-    rerank_endpoint: str | None
-    rerank_model: str | None
+    endpoint: str | None
+    model: str | None
     timeout_seconds: int
     rate_limit: int | None
     note: str | None
+    # embed 专属
+    dimensions: int | None
+    max_batch_size: int | None
+    max_batch_chars: int | None
+    max_input_chars: int | None
+    input_overlap_chars: int | None
+    # rerank(API) 专属
+    top_n: int | None
+    min_score: float | None
+    # chat 三类专属（llm_rerank / query_rewrite / intent）
+    tpm_limit: int | None
+    max_candidates: int | None
+    output_top_k: int | None
+    snippet_chars: int | None
+    num_rewrites: int | None
     api_key_last4: str
     last_used_at: datetime | None
     created_at: datetime | None
@@ -42,46 +55,58 @@ class CredentialRecord:
 
 @dataclass(frozen=True)
 class CredentialCreate:
+    kind: str
     name: str
     api_key: str
     provider: str | None = None
     status: str = "active"
     priority: int = 100
-    embed_endpoint: str | None = None
-    embed_model: str | None = None
-    dimensions: int = 1024
-    max_batch_size: int = 32
-    max_batch_chars: int = 32_000
-    max_input_chars: int = 8_000
-    input_overlap_chars: int = 400
-    rerank_endpoint: str | None = None
-    rerank_model: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
     timeout_seconds: int = 30
     rate_limit: int | None = None
     note: str | None = None
+    dimensions: int | None = None
+    max_batch_size: int | None = None
+    max_batch_chars: int | None = None
+    max_input_chars: int | None = None
+    input_overlap_chars: int | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
 
 
 @dataclass(frozen=True)
 class CredentialUpdate:
     """部分更新：字段为 None 表示不改；api_key 非空则同步刷新 hash。"""
 
+    kind: str | None = None
     name: str | None = None
     api_key: str | None = None
     provider: str | None = None
     status: str | None = None
     priority: int | None = None
-    embed_endpoint: str | None = None
-    embed_model: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    timeout_seconds: int | None = None
+    rate_limit: int | None = None
+    note: str | None = None
     dimensions: int | None = None
     max_batch_size: int | None = None
     max_batch_chars: int | None = None
     max_input_chars: int | None = None
     input_overlap_chars: int | None = None
-    rerank_endpoint: str | None = None
-    rerank_model: str | None = None
-    timeout_seconds: int | None = None
-    rate_limit: int | None = None
-    note: str | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
 
 
 class CredentialAdminStore(Protocol):

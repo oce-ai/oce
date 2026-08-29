@@ -129,26 +129,38 @@ class MonitoringStatsResponse(BaseModel):
     resource: ResourceSnapshotResponse | None = None
 
 
+# 凭据用途：embed/rerank 走 REST（/v1/embeddings、/v1/rerank）；后三类走 chat。
+CredentialKind = Literal[
+    "embed", "rerank", "llm_rerank", "query_rewrite", "intent"
+]
+
+
 class CredentialResponse(BaseModel):
-    """凭据视图：脱敏，只暴露 api_key 尾 4 位。"""
+    """凭据视图：脱敏，只暴露 api_key 尾 4 位。kind 专属参数对其它 kind 为 None。"""
 
     id: int
+    kind: CredentialKind
     provider: str | None = None
     name: str
     status: str
     priority: int
-    embed_endpoint: str | None = None
-    embed_model: str | None = None
-    dimensions: int
-    max_batch_size: int
-    max_batch_chars: int
-    max_input_chars: int
-    input_overlap_chars: int
-    rerank_endpoint: str | None = None
-    rerank_model: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
     timeout_seconds: int
     rate_limit: int | None = None
     note: str | None = None
+    dimensions: int | None = None
+    max_batch_size: int | None = None
+    max_batch_chars: int | None = None
+    max_input_chars: int | None = None
+    input_overlap_chars: int | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
     api_key_last4: str
     last_used_at: datetime | None = None
     created_at: datetime | None = None
@@ -160,45 +172,57 @@ class CredentialListResponse(BaseModel):
 
 
 class CredentialCreateRequest(BaseModel):
+    kind: CredentialKind
     name: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
     provider: str | None = None
     status: Literal["active", "disabled"] = "active"
     priority: int = 100
-    embed_endpoint: str | None = None
-    embed_model: str | None = None
-    dimensions: int = 1024
-    max_batch_size: int = 32
-    max_batch_chars: int = 32_000
-    max_input_chars: int = 8_000
-    input_overlap_chars: int = 400
-    rerank_endpoint: str | None = None
-    rerank_model: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
     timeout_seconds: int = 30
     rate_limit: int | None = None
     note: str | None = None
-
-
-class CredentialUpdateRequest(BaseModel):
-    """部分更新：省略的字段不改；api_key 提供则同步刷新 hash。"""
-
-    name: str | None = None
-    api_key: str | None = None
-    provider: str | None = None
-    status: Literal["active", "disabled"] | None = None
-    priority: int | None = None
-    embed_endpoint: str | None = None
-    embed_model: str | None = None
     dimensions: int | None = None
     max_batch_size: int | None = None
     max_batch_chars: int | None = None
     max_input_chars: int | None = None
     input_overlap_chars: int | None = None
-    rerank_endpoint: str | None = None
-    rerank_model: str | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
+
+
+class CredentialUpdateRequest(BaseModel):
+    """部分更新：省略的字段不改；api_key 提供则同步刷新 hash。"""
+
+    kind: CredentialKind | None = None
+    name: str | None = None
+    api_key: str | None = None
+    provider: str | None = None
+    status: Literal["active", "disabled"] | None = None
+    priority: int | None = None
+    endpoint: str | None = None
+    model: str | None = None
     timeout_seconds: int | None = None
     rate_limit: int | None = None
     note: str | None = None
+    dimensions: int | None = None
+    max_batch_size: int | None = None
+    max_batch_chars: int | None = None
+    max_input_chars: int | None = None
+    input_overlap_chars: int | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
 
 
 class CredentialDuplicateRequest(BaseModel):

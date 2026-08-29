@@ -20,44 +20,63 @@ from sqlalchemy import (
 from oce.shared.database.session import Base
 
 
-class EmbeddingCredentialModel(Base):
-    """扁平凭据：一行 = 一个账号，自带 embed/rerank 渠道配置（无独立 provider 表）。
+class ModelCredentialModel(Base):
+    """多用途模型凭据：一行 = 一个 (kind, 账号) 通道。
 
-    embed_endpoint/embed_model 为空则该行不参与嵌入解析；rerank_endpoint/rerank_model
-    为空则不参与重排解析。resolve 时按 status='active' + priority 取最高优先级一条。
+    kind ∈ embed | rerank | llm_rerank | query_rewrite | intent。同一把 key 服务多个
+    用途时按 kind 分行（唯一约束是 (kind, api_key_hash)）。endpoint 语义随 kind 变化：
+    embed/rerank 存完整 URL（/v1/embeddings、/v1/rerank），chat 三类（llm_rerank/
+    query_rewrite/intent）存 base_url（/v1）。resolve 时按 kind + status='active' +
+    priority 取最高优先级一条，取不到回落各自的环境变量。kind 专属参数列对其它 kind 恒为
+    NULL，解析时缺失的字段回落 fallback 设置。
     """
 
-    __tablename__ = "embedding_credentials"
+    __tablename__ = "model_credentials"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String(16), nullable=False)
     provider = Column(String(64))  # 渠道标签（如 siliconflow），仅用于分组/复制
     name = Column(String(128), nullable=False)
     api_key = Column(String(512), nullable=False)
-    api_key_hash = Column(String(64), nullable=False, unique=True)
+    api_key_hash = Column(String(64), nullable=False)
+    endpoint = Column(String(512))
+    model = Column(String(128))
     status = Column(String(16), nullable=False, default="active")
     priority = Column(Integer, nullable=False, default=100)
-
-    embed_endpoint = Column(String(512))
-    embed_model = Column(String(128))
-    dimensions = Column(Integer, nullable=False, default=1024)
-    max_batch_size = Column(Integer, nullable=False, default=32)
-    max_batch_chars = Column(Integer, nullable=False, default=32_000)
-    max_input_chars = Column(Integer, nullable=False, default=8_000)
-    input_overlap_chars = Column(Integer, nullable=False, default=400)
-
-    rerank_endpoint = Column(String(512))
-    rerank_model = Column(String(128))
-
     timeout_seconds = Column(Integer, nullable=False, default=30)
     rate_limit = Column(Integer)
     note = Column(Text)
+
+    # embed 专属
+    dimensions = Column(Integer)
+    max_batch_size = Column(Integer)
+    max_batch_chars = Column(Integer)
+    max_input_chars = Column(Integer)
+    input_overlap_chars = Column(Integer)
+
+    # rerank(API) 专属
+    top_n = Column(Integer)
+    min_score = Column(Float)
+
+    # chat 三类专属：llm_rerank / query_rewrite / intent
+    tpm_limit = Column(Integer)
+    max_candidates = Column(Integer)
+    output_top_k = Column(Integer)
+    snippet_chars = Column(Integer)
+    num_rewrites = Column(Integer)
+
     last_used_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        Index("idx_embedding_credentials_status", "status"),
-        Index("idx_embedding_credentials_priority", "priority"),
+        UniqueConstraint("kind", "api_key_hash", name="uq_model_credentials_kind_key"),
+        Index(
+            "idx_model_credentials_kind_status_priority",
+            "kind",
+            "status",
+            "priority",
+        ),
     )
 
 

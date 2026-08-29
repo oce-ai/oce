@@ -67,6 +67,7 @@ from oce.application.worker import EmbedWorker
 from oce.domain.services.retrieval import RetrievalPipeline
 from oce.infrastructure.embed.credential_embedder import CredentialConfiguredEmbedder
 from oce.infrastructure.embed.credential_reranker import CredentialConfiguredReranker
+from oce.infrastructure.llm.credential_llm_client import CredentialConfiguredLLMClient
 from oce.infrastructure.milvus3 import Milvus3SearchStore
 from oce.infrastructure.milvus3.path_index import PathIndexClient
 from oce.infrastructure.persistence.credential_admin_store import (
@@ -89,9 +90,10 @@ from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
 
 
 class _CredentialRuntime:
-    def __init__(self, embedder, reranker) -> None:
+    def __init__(self, embedder, reranker, llm_clients=()) -> None:
         self._embedder = embedder
         self._reranker = reranker
+        self._llm_clients = [client for client in llm_clients if client is not None]
 
     async def reload(self) -> int:
         embedding_replacement = await self._embedder.prepare_reload()
@@ -106,6 +108,13 @@ class _CredentialRuntime:
             await self._reranker.discard_prepared(rerank_replacement)
             raise
         await self._reranker.activate_prepared(rerank_replacement)
+        # LLM 客户端无预备/激活两阶段（reload 仅原子替换 delegate）；旁路容错，
+        # 单个刷新失败不回滚已激活的 embedder/reranker，只记日志。
+        for client in self._llm_clients:
+            try:
+                await client.reload()
+            except Exception as exc:
+                logger.warning("LLM client reload failed: {}", exc)
         return pool_size
 
 
@@ -144,7 +153,6 @@ class Container:
             fallback_embedding_key=embedding_key,
             on_usage=token_usage_cb,
         )
-        credential_runtime = _CredentialRuntime(self.embedder, self.reranker)
 
         # Initialize path index for filename queries
         self.path_index = None
@@ -156,71 +164,69 @@ class Container:
                 logger.warning("Failed to initialize path index: {}", e)
                 self.path_index = None
 
-        # 共享 LLM 客户端：LLM 重排 / 查询改写 / 意图分类三者共用，任一开启即初始化
-        llm_client = None
-        if (
-            settings.llm.rerank_enabled
-            or settings.retrieval.query_rewrite_enabled
-            or settings.retrieval.intent_classification_enabled
-        ):
-            try:
-                from oce.infrastructure.llm.openai_compatible_client import OpenAICompatibleLLMClient
-                llm_client = OpenAICompatibleLLMClient(
-                    api_key=settings.llm.api_key.get_secret_value(),
-                    base_url=settings.llm.base_url,
-                    proxy=settings.llm.proxy,
-                    tpm_limit=settings.llm.tpm_limit,
-                    on_usage=token_usage_cb,
-                )
-                logger.info("LLM client initialized for rerank/query rewrite")
-            except Exception as e:
-                logger.warning("Failed to initialize LLM client: {}", e)
+        # LLM 三类（LLM 重排 / 查询改写 / 意图分类）各自按 kind 从 model_credentials 解析
+        # 凭证（env 兜底），不再共用单一 client，可分别配置 key/base_url/model/tpm。
+        # reload 命令会一并刷新它们（credential_runtime 持有列表）。
+        llm_clients: list[CredentialConfiguredLLMClient] = []
 
-        # Initialize LLM reranker if enabled
         self.llm_reranker = None
-        if settings.llm.rerank_enabled and llm_client:
-            try:
-                from oce.domain.services.llm.reranker import LLMReranker
-                self.llm_reranker = LLMReranker(
-                    client=llm_client,
-                    model=settings.llm.model,
-                    max_candidates=settings.llm.max_candidates,
-                    output_top_k=settings.llm.output_top_k,
-                    snippet_chars=settings.llm.snippet_chars,
-                )
-                logger.info("LLM reranker enabled with model: {}", settings.llm.model)
-            except Exception as e:
-                logger.warning("Failed to initialize LLM reranker: {}", e)
-                self.llm_reranker = None
+        if settings.llm.rerank_enabled:
+            rerank_llm = CredentialConfiguredLLMClient(
+                "llm_rerank",
+                async_session_factory,
+                settings.llm,
+                fallback_model=settings.llm.model,
+                on_usage=token_usage_cb,
+            )
+            llm_clients.append(rerank_llm)
+            from oce.domain.services.llm.reranker import LLMReranker
+            self.llm_reranker = LLMReranker(
+                client=rerank_llm,
+                model=settings.llm.model,
+                max_candidates=settings.llm.max_candidates,
+                output_top_k=settings.llm.output_top_k,
+                snippet_chars=settings.llm.snippet_chars,
+            )
+            logger.info("LLM reranker enabled (kind=llm_rerank)")
 
-        # Initialize query rewriter if enabled
         self.query_rewriter = None
-        if settings.retrieval.query_rewrite_enabled and llm_client:
-            try:
-                from oce.domain.services.llm.rewriter import QueryRewriter
-                self.query_rewriter = QueryRewriter(
-                    client=llm_client,
-                    model=settings.retrieval.query_rewrite_model,
-                    num_rewrites=settings.retrieval.query_rewrite_num,
-                )
-                logger.info("Query rewriter enabled with {} rewrites", settings.retrieval.query_rewrite_num)
-            except Exception as e:
-                logger.warning("Failed to initialize query rewriter: {}", e)
-                self.query_rewriter = None
+        if settings.retrieval.query_rewrite_enabled:
+            rewrite_llm = CredentialConfiguredLLMClient(
+                "query_rewrite",
+                async_session_factory,
+                settings.llm,
+                fallback_model=settings.retrieval.query_rewrite_model,
+                on_usage=token_usage_cb,
+            )
+            llm_clients.append(rewrite_llm)
+            from oce.domain.services.llm.rewriter import QueryRewriter
+            self.query_rewriter = QueryRewriter(
+                client=rewrite_llm,
+                model=settings.retrieval.query_rewrite_model,
+                num_rewrites=settings.retrieval.query_rewrite_num,
+            )
+            logger.info("Query rewriter enabled (kind=query_rewrite)")
 
-        # Initialize intent classifier if enabled
         self.intent_classifier = None
-        if settings.retrieval.intent_classification_enabled and llm_client:
-            try:
-                from oce.domain.services.llm.intent import IntentClassifier
-                self.intent_classifier = IntentClassifier(
-                    llm_client=llm_client,
-                    model=settings.llm.model,
-                )
-                logger.info("Intent classifier enabled with model: {}", settings.llm.model)
-            except Exception as e:
-                logger.warning("Failed to initialize intent classifier: {}", e)
-                self.intent_classifier = None
+        if settings.retrieval.intent_classification_enabled:
+            intent_llm = CredentialConfiguredLLMClient(
+                "intent",
+                async_session_factory,
+                settings.llm,
+                fallback_model=settings.llm.model,
+                on_usage=token_usage_cb,
+            )
+            llm_clients.append(intent_llm)
+            from oce.domain.services.llm.intent import IntentClassifier
+            self.intent_classifier = IntentClassifier(
+                llm_client=intent_llm,
+                model=settings.llm.model,
+            )
+            logger.info("Intent classifier enabled (kind=intent)")
+
+        credential_runtime = _CredentialRuntime(
+            self.embedder, self.reranker, llm_clients
+        )
 
         self.chunker = build_chunker()
         self._uow_factory = lambda: SqlAlchemyUnitOfWork(async_session_factory)

@@ -21,25 +21,6 @@ _OUTPUT_TOKEN_ALLOWANCE = 256
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 20.0
 
-# 默认开启思维链的模型标记。检索链路只要结论，思维链会挤占 max_tokens
-# 并把单次调用从 4s 拖到 20s+，命中这些标记时显式关闭。
-# qwen3.5 / qwen3.7 系列默认混合推理：实测 3 个候选的 rerank 也会烧掉 1084 个
-# reasoning token、耗时 8.4s，关闭后降到 0.3s，且排序质量无可观测差异。
-_REASONING_MODEL_MARKERS = (
-    "deepseek-v4",
-    "deepseek-reasoner",
-    "thinking",
-    "qwen3.5",
-    "qwen3.7",
-)
-
-
-def _is_reasoning_model(model: str) -> bool:
-    """判断模型是否默认开启思维链。"""
-    name = model.lower()
-    return any(marker in name for marker in _REASONING_MODEL_MARKERS)
-
-
 class OpenAICompatibleLLMClient:
     """OpenAI 兼容的 LLM 聊天客户端（/v1/chat/completions），rerank / rewrite / intent 共用。"""
 
@@ -105,9 +86,14 @@ class OpenAICompatibleLLMClient:
             **kwargs,
         }
 
-        # 非推理模型不发该字段，避免网关因未知参数报错。
-        if _is_reasoning_model(model) and "thinking" not in payload:
-            payload["thinking"] = {"type": "disabled"}
+        # 统一关闭思维链；调用方显式传 thinking 时（kwargs 已合并进 payload）不覆盖。
+        if 'openrouter.ai' in self.base_url:
+            payload.setdefault("reasoning", {
+                "enabled": False,
+                "effort": 'none',
+            })
+        else:
+            payload.setdefault("thinking", {"type": "disabled"})
 
         client_kwargs: dict = {"timeout": self.timeout}
         if self.proxy:
@@ -137,6 +123,8 @@ class OpenAICompatibleLLMClient:
 
                     # 提取响应内容
                     content = data["choices"][0]["message"]["content"]
+                    if content is None:
+                        content = data["choices"][0]["message"]["reasoning"]
                     # 按真实 usage 上报（旁路，缺字段则跳过）；credential_id 由构造时注入
                     if self._on_usage is not None:
                         usage = data.get("usage") or {}

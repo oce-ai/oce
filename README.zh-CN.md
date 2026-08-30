@@ -10,9 +10,11 @@ dense + exact + path 混合召回 · cAST 语义切块 · LLM 重排 · 覆盖�
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+[![CI](https://img.shields.io/github/actions/workflow/status/oce-ai/oce/ci.yml?branch=master&logo=github&label=CI)](https://github.com/oce-ai/oce/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/opencontextengine?logo=pypi&logoColor=white)](https://pypi.org/project/opencontextengine/)
+[![Python](https://img.shields.io/pypi/pyversions/opencontextengine?logo=python&logoColor=white)](https://pypi.org/project/opencontextengine/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/oce-ai/oce/pkgs/container/oce)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Milvus](https://img.shields.io/badge/Vectors-Milvus%203.0-00A1EA.svg)](https://milvus.io/)
 [![ACE](https://img.shields.io/badge/ACE-compatible-success.svg)](#api)
@@ -34,6 +36,7 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 - **两种部署模式** —— 零依赖个人模式（SQLite + 内嵌 Milvus Lite）面向单机；服务模式（PostgreSQL + Milvus 3.0 + Redis）面向共享与更高吞吐。
 - **ACE 兼容 API** —— 面向 ACE 客户端的 `/agents/*` 接口，Bearer 鉴权保护。
 - **清晰的 DDD/CQRS 架构** —— 依赖向内收敛；infrastructure 只由 composition root 装配，业务逻辑保持可测。
+- **运维 admin API + 监控** —— 独立 admin key 的接口面管理模型凭据、嵌入队列与垃圾回收；旁路 metrics 管线记录调用/token/资源指标与检索各阶段审计。
 - **[可复现的评测框架](https://github.com/oce-ai/oce-benchmark)** —— 纯 HTTP 的基准套件，用 Top-1 + nDCG@10 在真实仓库上衡量检索质量。
 
 <details>
@@ -95,10 +98,11 @@ uv run alembic upgrade head
 uv run uvicorn oce.main:app --host 127.0.0.1 --port 8986
 ```
 
-嵌入和重排客户端会先从 `embedding_credentials` 与 `embedding_providers` 联表中取优先级
-数字最小的启用行。数据库没有匹配行时，嵌入回退到 `EMBED_*`，重排回退到 `RERANK_*`、
-再回退到嵌入 key。`POST /admin/reload-embedding-credentials` 可在不重启服务的情况下刷新
-两个客户端。
+模型客户端从单张 `model_credentials` 表按 `kind`（`embed`、`rerank`、`llm_rerank`、
+`query_rewrite`、`intent`）解析凭据：取 status=active 中 `priority` 数字最小的一行。某个
+kind 没有匹配的启用行时，对应客户端回退到各自的环境变量（`EMBED_*`、`RERANK_*`、`LLM_*`；
+重排还会复用嵌入 key）。通过 `/admin/credentials` API 管理这些行，再调
+`POST /admin/credentials/reload` 即可在不重启服务的情况下热重载所有客户端。
 
 SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`max_batch_size` 和
 `max_batch_chars` 是每个凭据可覆盖的 provider 默认值。超过 `max_input_chars` 的输入会在
@@ -118,22 +122,41 @@ SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`ma
 
 ## API
 
-除 `GET /health` 外，所有端点都需要 `Authorization: Bearer <API_KEY>`。
+鉴权分三档：
+
+- **公开**（无需鉴权）—— `GET /health`、`GET /version`
+- **数据面** —— `Authorization: Bearer <API_KEY>`
+- **Admin**（`/admin/*`）—— `Authorization: Bearer <ADMIN_API_KEY>`；未配置 `ADMIN_API_KEY` 时回落到 `API_KEY`
 
 后端默认已放行官方 `oce-admin` 面板 `https://oce-ai.github.io`，直接使用公共面板时无需额外配置。
 若面板部署在自定义域名或私有地址，用 `CORS_ORIGINS` 覆盖（多个来源用逗号分隔）；设
 `CORS_ORIGINS=`（留空）可关闭浏览器跨域调用。admin key 仅保存在面板浏览器的本地存储中，不要写入仓库或 URL。
 
+### 数据面端点
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/find-missing` | 分类未知和待处理的 blob 哈希 |
+| `POST` | `/find-missing` | 分类未知和未索引的 blob 哈希 |
 | `POST` | `/batch-upload` | 切块、嵌入并索引源码 blob |
 | `POST` | `/agents/codebase-retrieval` | 返回格式化的代码上下文 |
-| `POST` | `/agents/codebase-retrieval-paths` | 返回排序后的路径和行锚点 |
-| `POST` | `/agents/project-overview` | 返回关键文档、概览查询和有界路径 |
 | `POST` | `/agents/blob-status` | 校对 blob 与 checkpoint 状态 |
 | `POST` | `/checkpoint-blobs` | 创建或推进工作集 checkpoint |
-| `POST` | `/admin/reload-embedding-credentials` | 重新加载当前启用的嵌入凭据 |
+
+### Admin 端点
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/admin/credentials` | 列出模型凭据（密钥已脱敏） |
+| `POST` | `/admin/credentials` | 创建凭据 |
+| `PATCH` | `/admin/credentials/{id}` | 更新凭据 |
+| `DELETE` | `/admin/credentials/{id}` | 删除凭据 |
+| `POST` | `/admin/credentials/{id}/duplicate` | 用新 key 复制一份凭据 |
+| `POST` | `/admin/credentials/reload` | 热重载启用中的凭据 |
+| `GET` | `/admin/queue` | 嵌入队列深度与在飞数 |
+| `POST` | `/admin/queue/reset` | 清空或重置嵌入队列 |
+| `POST` | `/admin/queue/requeue-stale` | 重新入队滞留的在飞 blob |
+| `POST` | `/admin/gc` | 回收过期的 chain 与 blob |
+| `GET` | `/admin/stats` | 调用 / token / 检索 / 资源指标 |
 
 示例：
 
@@ -191,7 +214,7 @@ flowchart TB
 
     subgraph STORE["存储与外部服务"]
         direction LR
-        DB[("PostgreSQL / SQLite<br/>元数据 · symbol_occurrences")]
+        DB[("PostgreSQL / SQLite<br/>元数据 · symbol_occurrences<br/>model_credentials · metrics")]
         Milvus[("Milvus 3.0 / Milvus Lite<br/>dense 向量 · 路径索引")]
         Redis[("Redis · 任务队列")]
         EmbedAPI{{"Embedding API"}}

@@ -10,9 +10,11 @@ Hybrid dense + exact + path recall · cAST-aware chunking · LLM reranking · co
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
+[![CI](https://img.shields.io/github/actions/workflow/status/oce-ai/oce/ci.yml?branch=master&logo=github&label=CI)](https://github.com/oce-ai/oce/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/opencontextengine?logo=pypi&logoColor=white)](https://pypi.org/project/opencontextengine/)
+[![Python](https://img.shields.io/pypi/pyversions/opencontextengine?logo=python&logoColor=white)](https://pypi.org/project/opencontextengine/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](pyproject.toml)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/oce-ai/oce/pkgs/container/oce)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Milvus](https://img.shields.io/badge/Vectors-Milvus%203.0-00A1EA.svg)](https://milvus.io/)
 [![ACE](https://img.shields.io/badge/ACE-compatible-success.svg)](#api)
@@ -36,6 +38,7 @@ Milvus Lite, background worker disabled) for a single machine, and a **service m
 - **Two deployment modes** — zero-dependency personal mode (SQLite + embedded Milvus Lite) for a single machine, or service mode (PostgreSQL + Milvus 3.0 + Redis) for shared, higher-throughput use.
 - **ACE-compatible API** — a drop-in `/agents/*` surface for ACE clients, secured with bearer auth.
 - **Clean DDD/CQRS architecture** — dependencies point inward; infrastructure is wired only by the composition root, keeping business logic testable.
+- **Operational admin API + monitoring** — an admin-key-scoped surface manages model credentials, the embedding queue, and garbage collection, while a bypass metrics pipeline records call/token/resource stats and per-stage retrieval audits.
 - **[Reproducible evaluation harness](https://github.com/oce-ai/oce-benchmark)** — an HTTP-only benchmark suite scores retrieval quality with Top-1 + nDCG@10 against real repositories.
 
 <details>
@@ -100,11 +103,12 @@ uv run alembic upgrade head
 uv run uvicorn oce.main:app --host 127.0.0.1 --port 8986
 ```
 
-Embedding and rerank clients first resolve the lowest-priority-number active row from
-`embedding_credentials` joined with `embedding_providers`. When no matching database row
-exists, embedding falls back to `EMBED_*`; rerank falls back to `RERANK_*` and then the
-embedding key. `POST /admin/reload-embedding-credentials` refreshes both clients without
-restarting the service.
+Model clients resolve credentials from the single `model_credentials` table by `kind`
+(`embed`, `rerank`, `llm_rerank`, `query_rewrite`, `intent`): the active row with the
+lowest `priority` number wins. When no active row matches a kind, that client falls back
+to its environment variables (`EMBED_*`, `RERANK_*`, `LLM_*`; rerank also reuses the
+embedding key). Manage these rows through the `/admin/credentials` API, then call
+`POST /admin/credentials/reload` to hot-reload every client without restarting the service.
 
 SiliconFlow accepts at most 32,000 characters across one embedding request's `input`
 array. `max_batch_size` and `max_batch_chars` are provider defaults that each credential
@@ -130,18 +134,42 @@ re-upload them indefinitely. Project manifests and test fixtures have explicit e
 
 ## API
 
-All endpoints except `GET /health` require `Authorization: Bearer <API_KEY>`.
+Three auth tiers:
+
+- **Public** (no auth) — `GET /health`, `GET /version`
+- **Data plane** — `Authorization: Bearer <API_KEY>`
+- **Admin** (`/admin/*`) — `Authorization: Bearer <ADMIN_API_KEY>`; when `ADMIN_API_KEY` is unset it falls back to `API_KEY`
+
+Browser calls from the official admin panel (`https://oce-ai.github.io`) are allowed by
+default; override the allowlist with `CORS_ORIGINS` (comma-separated) or set it empty to
+disable CORS. The admin key lives only in the panel's browser storage — never commit it or
+put it in a URL.
+
+### Data-plane endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/find-missing` | Classify unknown and pending blob hashes |
+| `POST` | `/find-missing` | Classify unknown and non-indexed blob hashes |
 | `POST` | `/batch-upload` | Chunk, embed, and index source blobs |
 | `POST` | `/agents/codebase-retrieval` | Return formatted code context |
-| `POST` | `/agents/codebase-retrieval-paths` | Return ranked path and line anchors |
-| `POST` | `/agents/project-overview` | Return key docs, overview queries, and bounded paths |
 | `POST` | `/agents/blob-status` | Reconcile blob and checkpoint state |
 | `POST` | `/checkpoint-blobs` | Create or advance a working-set checkpoint |
-| `POST` | `/admin/reload-embedding-credentials` | Reload the active embedding credential |
+
+### Admin endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/admin/credentials` | List model credentials (secrets masked) |
+| `POST` | `/admin/credentials` | Create a credential |
+| `PATCH` | `/admin/credentials/{id}` | Update a credential |
+| `DELETE` | `/admin/credentials/{id}` | Delete a credential |
+| `POST` | `/admin/credentials/{id}/duplicate` | Clone a credential with a new key |
+| `POST` | `/admin/credentials/reload` | Hot-reload active credentials |
+| `GET` | `/admin/queue` | Embedding queue depth and inflight count |
+| `POST` | `/admin/queue/reset` | Drain or reset the embedding queue |
+| `POST` | `/admin/queue/requeue-stale` | Requeue stale inflight blobs |
+| `POST` | `/admin/gc` | Garbage-collect expired chains and blobs |
+| `GET` | `/admin/stats` | Call / token / retrieval / resource metrics |
 
 Example:
 
@@ -199,7 +227,7 @@ flowchart TB
 
     subgraph STORE["Stores & external services"]
         direction LR
-        DB[("PostgreSQL / SQLite<br/>metadata · symbol_occurrences")]
+        DB[("PostgreSQL / SQLite<br/>metadata · symbol_occurrences<br/>model_credentials · metrics")]
         Milvus[("Milvus 3.0 / Milvus Lite<br/>dense vectors · path index")]
         Redis[("Redis · task queue")]
         EmbedAPI{{"Embedding API"}}

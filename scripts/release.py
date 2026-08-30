@@ -28,7 +28,7 @@ import generate_changelog
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-BUNDLED_FILES = ["pyproject.toml", "src/oce/__init__.py", "CHANGELOG.md"]
+BUNDLED_FILES = ["pyproject.toml", "src/oce/__init__.py", "uv.lock", "CHANGELOG.md"]
 
 
 def _stdout() -> None:
@@ -69,9 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"==> 发布 {target}（当前 {current}）")
     print("计划:")
     print(f"  1. 更新版本号 pyproject.toml + __init__.py -> {target}")
-    print("  2. 生成并写入 CHANGELOG 段")
-    print("  3. uv build")
-    print(f"  4. git commit 'chore(release): v{target}' + git tag v{target}")
+    print("  2. uv lock 同步锁文件")
+    print("  3. 生成并写入 CHANGELOG 段")
+    print("  4. uv build")
+    print(f"  5. git commit 'chore(release): v{target}' + git tag v{target}")
     if args.dry_run:
         print("[dry-run] 结束，未做任何修改")
         return 0
@@ -80,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     bump_version.update_init(target)
     bump_version.verify_sync()
     print(f"版本已更新: {current} -> {target}")
+
+    # bump 只改 pyproject/__init__，uv.lock 记录的根包版本会滞后；不同步会让 CI/Release
+    # 的 `uv sync --locked` 失败，故发布时强制重锁并把 uv.lock 纳入发布提交。
+    run(["uv", "lock"])
+    print("uv.lock 已同步")
 
     section = generate_changelog.build_section(target, since=generate_changelog.latest_tag())
     if "### " not in section:

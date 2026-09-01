@@ -30,6 +30,18 @@ It ships two deployment modes: a zero-dependency **personal mode** (SQLite + emb
 Milvus Lite, background worker disabled) for a single machine, and a **service mode**
 (PostgreSQL + Milvus 3.0 + Redis) for shared, higher-throughput deployments.
 
+The project is fully open source, with the server and client maintained separately:
+
+- Server: <https://github.com/oce-ai/oce>
+- Client: <https://github.com/oce-ai/oce-client>
+
+This is the refactored successor to the earlier ACE service. See the original
+[linux.do discussion](https://linux.do/t/topic/2308140/125) for background.
+
+Use personal mode when an AI coding tool only needs code context from your local machine.
+Deploy service mode, together with `opencontextengine-client`, when multiple users or
+machines need to share one index.
+
 ## Features
 
 - **Hybrid retrieval** — concurrent dense semantic recall (Milvus 3.0), exact identifier lookup (`symbol_occurrences`), and an independent path index, fused with weighted rank fusion.
@@ -48,6 +60,7 @@ Milvus Lite, background worker disabled) for a single machine, and a **service m
 - [Requirements](#requirements)
 - [Personal mode](#personal-mode)
 - [Service mode](#service-mode)
+- [Client and MCP](#client-and-mcp)
 - [API](#api)
 - [Architecture](#architecture)
   - [Retrieval pipeline](#retrieval-pipeline)
@@ -67,14 +80,52 @@ Redis; its development stack is defined in `docker-compose.dev.yml`.
 
 ## Personal mode
 
-Install the CLI, generate a config, set the embedding key, and serve:
+Personal mode is intended for local use and does not require separate PostgreSQL, Milvus,
+or Redis services. Install the CLI, generate a config, set the embedding key, and serve:
 
 ```powershell
 uv tool install opencontextengine
 oce init                    # writes ~/.oce/data/.env
-# edit ~/.oce/data/.env: set EMBED_API_KEY (API_KEY is pre-filled for local use)
+```
+
+Edit `~/.oce/data/.env`. The embedding service is the only required setting for indexing
+and retrieval. The defaults use SiliconFlow and Qwen3-Embedding-4B (1024-dimensional
+vectors):
+
+```dotenv
+EMBED_API_KEY=your_embedding_service_key
+# These already have defaults; change them only when using another provider or model.
+EMBED_ENDPOINT=https://api.siliconflow.cn/v1/embeddings
+EMBED_MODEL=Qwen/Qwen3-Embedding-4B
+```
+
+For better intent classification and semantic reranking, configure an OpenAI-compatible
+lightweight LLM. Use the model and endpoint provided by your vendor; for example,
+`qwen3.7-flash` or another low-latency model:
+
+```dotenv
+LLM_API_KEY=your_llm_service_key
+LLM_BASE_URL=https://provider.example.com/v1
+LLM_MODEL=qwen3.7-flash
+RERANK_ENABLED=false
+```
+
+If you do not want to configure an LLM yet, disable both LLM features:
+
+```dotenv
+LLM_RERANK_ENABLED=false
+RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false
+```
+
+Then start the service:
+
+```powershell
 oce serve                   # http://127.0.0.1:8986
 ```
+
+Personal mode binds to `127.0.0.1` by default and pre-fills the client-compatible
+`API_KEY=sk-opencontextengine`. If you expose the service on a LAN or the public internet,
+replace it with a strong random key and set the same value in the client as `OCE_API_KEY`.
 
 `oce serve` runs the database migrations (Alembic) on startup, then provisions SQLite,
 the embedded Milvus Lite file, and a disabled background worker automatically, so
@@ -93,15 +144,51 @@ For a throwaway run without installing: `uvx --from opencontextengine oce serve`
 
 ## Service mode
 
-For shared deployments backed by PostgreSQL, Milvus 3.0, and Redis:
+Service mode is intended for multiple users or machines sharing one index. It is backed
+by PostgreSQL, Milvus 3.0, and Redis. The repository's Docker Compose setup is the
+recommended starting point:
 
 ```powershell
-uv sync --extra dev
+git clone https://github.com/oce-ai/oce.git
+Set-Location oce
 Copy-Item .env.example .env
-docker compose -f docker-compose.dev.yml up -d
-uv run alembic upgrade head
-uv run uvicorn oce.main:app --host 127.0.0.1 --port 8986
+# Edit .env: set API_KEY, ADMIN_API_KEY, and EMBED_API_KEY; add LLM_API_KEY as needed.
+docker compose up -d
 ```
+
+The root `docker-compose.yml` starts OCE, PostgreSQL, Redis, and the Milvus dependencies;
+the application container runs database migrations on startup. In service mode, replace
+`API_KEY` and `ADMIN_API_KEY` with strong random values and set the
+`POSTGRES_PASSWORD` and `REDIS_PASSWORD` values used by Compose. Never commit real
+credentials. For development setups that start only the dependencies and run the app on
+the host, use `docker-compose.dev.yml`; update `DB_URL` and `REDIS_URL` to its published
+host ports before running `uv run alembic upgrade head` and `uv run uvicorn`.
+The development file publishes PostgreSQL on `25432`, Redis on `26379`, and Milvus on
+`19530` by default.
+
+You can also use the published image directly:
+
+```powershell
+docker pull ghcr.io/oce-ai/oce:latest
+```
+
+In your own Compose, Kubernetes, or other deployment, set the application image to
+`ghcr.io/oce-ai/oce:latest` and provide `DB_URL`, `REDIS_URL`, and `MILVUS_ENDPOINT`.
+The image listens on port `8986` inside the container.
+
+### Admin panel
+
+After the service starts, use the official web panel at
+<https://oce-ai.github.io/oce-admin>.
+
+1. Set a dedicated `ADMIN_API_KEY` on the server (if unset, it falls back to `API_KEY`).
+2. Enter the service URL and admin key in the panel.
+3. Manage model credentials, the embedding queue, garbage collection, and monitoring
+   metrics from the panel.
+
+The admin key is stored only in the browser's local storage. Do not put it in a URL,
+repository, or log. For a custom panel domain, configure its allowed origin with
+`CORS_ORIGINS`.
 
 Model clients resolve credentials from the single `model_credentials` table by `kind`
 (`embed`, `rerank`, `llm_rerank`, `query_rewrite`, `intent`): the active row with the
@@ -131,6 +218,38 @@ Upload admission rejects dependency/build/cache directories, NUL-containing file
 non-source artifacts such as SVG, media, archives, minified bundles, source maps, and lock
 files before chunking. Skipped paths are persisted as empty ready blobs so clients do not
 re-upload them indefinitely. Project manifests and test fixtures have explicit exemptions.
+
+## Client and MCP
+
+The client scans a local workspace, uploads changes, maintains checkpoints, and retrieves
+current code context from the service. It is released as a separate package; see
+<https://github.com/oce-ai/oce-client>:
+
+```powershell
+uv tool install opencontextengine-client
+
+$env:OCE_API_URL = "http://127.0.0.1:8986"
+$env:OCE_API_KEY = "sk-opencontextengine"  # use the server API_KEY in service mode
+$env:OCE_WORKSPACE = (Get-Location).Path
+
+oce-client sync
+oce-client retrieve "Where is request authentication implemented?"
+```
+
+To connect an AI coding tool that supports MCP, install the optional MCP extra and start
+the stdio server:
+
+```powershell
+uv tool install "opencontextengine-client[mcp]"
+oce-client-mcp --workspace C:\path\to\workspace
+```
+
+`oce-client-mcp` builds the initial index in the background, watches the workspace, and
+exposes `codebase-retrieval` as an MCP tool. Pass `--workspace` more than once for
+multiple workspaces; tool calls must then include the matching `workspace_folder`.
+`OCE_API_URL`, `OCE_API_KEY`, and `OCE_WORKSPACE`/`OCE_WORKSPACES` provide environment
+variable equivalents. Keep credentials in environment variables or a secret manager,
+not in the MCP configuration file.
 
 ## API
 
@@ -177,8 +296,9 @@ Example:
 $headers = @{ Authorization = "Bearer $env:API_KEY" }
 $body = @{
   information_request = "Where is request authentication implemented?"
-  # 全库检索已禁用：必须声明工作集（有效的 checkpoint_id 或非空 added_blobs）。
-  # added_blobs 是 batch-upload 返回的 blob_name（sha256 内容地址），此处为示例占位。
+  # Full-repository search is disabled: declare a working set with a valid checkpoint_id
+  # or a non-empty added_blobs list. added_blobs are blob_name values returned by
+  # batch-upload (content-addressed by SHA-256); this is a placeholder example.
   blobs = @{ checkpoint_id = ""; added_blobs = @("<blob-name-from-batch-upload>"); deleted_blobs = @() }
 } | ConvertTo-Json -Depth 4
 Invoke-RestMethod http://127.0.0.1:8986/agents/codebase-retrieval `

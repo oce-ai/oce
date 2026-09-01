@@ -28,6 +28,17 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 它提供两种部署模式：零依赖的**个人模式**（SQLite + 内嵌 Milvus Lite，后台 worker 关闭），
 面向单机；以及**服务模式**（PostgreSQL + Milvus 3.0 + Redis），面向共享、更高吞吐的部署。
 
+项目完全开源，服务端和客户端分别维护：
+
+- 服务端：<https://github.com/oce-ai/oce>
+- 客户端：<https://github.com/oce-ai/oce-client>
+
+这是此前 ACE 服务的重构版本，相关背景和早期实现见
+[linux.do 讨论](https://linux.do/t/topic/2308140/125)。
+
+如果你只想在本机给 AI 编码工具提供代码上下文，直接使用个人模式即可；如果需要让多台
+机器或多个用户共享同一套索引，再部署服务模式并配合 `opencontextengine-client`。
+
 ## 特性
 
 - **混合检索** —— 并发的 dense 语义召回（Milvus 3.0）、exact 精确标识符查找（`symbol_occurrences`）与独立路径索引，用加权 rank fusion 融合。
@@ -46,6 +57,7 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 - [环境要求](#环境要求)
 - [个人模式](#个人模式)
 - [服务模式](#服务模式)
+- [客户端与 MCP](#客户端与-mcp)
 - [API](#api)
 - [架构](#架构)
   - [检索管线](#检索管线)
@@ -64,14 +76,49 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 
 ## 个人模式
 
-安装 CLI、生成配置、填好嵌入 key，然后启动：
+个人模式适合本机使用，不需要单独部署 PostgreSQL、Milvus 或 Redis。安装 CLI、生成配置、
+填好嵌入 key，然后启动：
 
 ```powershell
 uv tool install opencontextengine
 oce init                    # 生成 ~/.oce/data/.env
-# 编辑 ~/.oce/data/.env：设置 EMBED_API_KEY（API_KEY 已为本机预填）
+```
+
+编辑 `~/.oce/data/.env`。嵌入服务是建库和检索所需的唯一必填项；默认配置使用 SiliconFlow
+和 Qwen3-Embedding-4B（输出 1024 维向量）：
+
+```dotenv
+EMBED_API_KEY=你的嵌入服务密钥
+# 以下两项已有默认值，只有更换供应商或模型时才需要修改
+EMBED_ENDPOINT=https://api.siliconflow.cn/v1/embeddings
+EMBED_MODEL=Qwen/Qwen3-Embedding-4B
+```
+
+推荐再配置一个 OpenAI 兼容的轻量 LLM，用于意图识别和语义精排。模型名和 endpoint 请以
+你使用的供应商为准，例如 `qwen3.7-flash`；追求速度时也可以选择供应商提供的更快模型：
+
+```dotenv
+LLM_API_KEY=你的 LLM 服务密钥
+LLM_BASE_URL=https://provider.example.com/v1
+LLM_MODEL=qwen3.7-flash
+RERANK_ENABLED=false
+```
+
+如果暂时不配置 LLM，请同时关闭 LLM 重排和意图分类：
+
+```dotenv
+LLM_RERANK_ENABLED=false
+RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false
+```
+
+然后启动服务：
+
+```powershell
 oce serve                   # http://127.0.0.1:8986
 ```
+
+个人模式默认只监听 `127.0.0.1`，并预填客户端约定的 `API_KEY=sk-opencontextengine`。如果
+要监听局域网或公网地址，请改用强随机 `API_KEY`，并在客户端同步设置 `OCE_API_KEY`。
 
 `oce serve` 启动时会自动执行数据库迁移（Alembic），然后准备好 SQLite、内嵌 Milvus Lite
 文件和一个关闭的后台 worker，因此 `oce init` 只暴露你真正要填的少量 key。生成的 `.env`
@@ -88,15 +135,44 @@ oce serve                   # http://127.0.0.1:8986
 
 ## 服务模式
 
-面向由 PostgreSQL、Milvus 3.0 和 Redis 支撑的共享部署：
+服务模式面向多人或多台机器共享索引，由 PostgreSQL、Milvus 3.0 和 Redis 支撑。推荐使用
+仓库自带的 Docker Compose：
 
 ```powershell
-uv sync --extra dev
+git clone https://github.com/oce-ai/oce.git
+Set-Location oce
 Copy-Item .env.example .env
-docker compose -f docker-compose.dev.yml up -d
-uv run alembic upgrade head
-uv run uvicorn oce.main:app --host 127.0.0.1 --port 8986
+# 编辑 .env：至少设置 API_KEY、ADMIN_API_KEY、EMBED_API_KEY；按需设置 LLM_API_KEY
+docker compose up -d
 ```
+
+根目录的 `docker-compose.yml` 会一起启动 OCE、PostgreSQL、Redis 和 Milvus 依赖，应用容器
+启动时自动执行迁移。服务模式务必把 `API_KEY` 和 `ADMIN_API_KEY` 换成强随机值，并在 `.env`
+中设置 Compose 使用的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD`；不要把真实密钥提交到仓库。
+开发环境若只想启动依赖、在宿主机运行应用，可使用 `docker-compose.dev.yml`，但要先把
+`.env` 中的 `DB_URL`、`REDIS_URL` 改为该文件映射到宿主机的端口，再执行
+`uv run alembic upgrade head` 和 `uv run uvicorn`。
+
+也可以直接使用已经发布的镜像：
+
+```powershell
+docker pull ghcr.io/oce-ai/oce:latest
+```
+
+在自己的 Compose、Kubernetes 或其它编排文件中，将应用服务镜像设为
+`ghcr.io/oce-ai/oce:latest`，并提供下面三个服务连接配置：`DB_URL`、`REDIS_URL` 和
+`MILVUS_ENDPOINT`。镜像入口默认监听容器内的 `8986` 端口。
+
+### Admin 管理面板
+
+服务启动后可使用官方在线面板：<https://oce-ai.github.io/oce-admin>。
+
+1. 在服务端设置独立的 `ADMIN_API_KEY`（不设置时会回落到 `API_KEY`）。
+2. 在面板中填写服务地址和 admin key。
+3. 通过面板管理模型凭据、队列、垃圾回收和监控指标。
+
+admin key 只保存在浏览器本地存储中，不要写入 URL、仓库或日志。自定义面板域名时，用
+`CORS_ORIGINS` 配置允许的来源。
 
 模型客户端从单张 `model_credentials` 表按 `kind`（`embed`、`rerank`、`llm_rerank`、
 `query_rewrite`、`intent`）解析凭据：取 status=active 中 `priority` 数字最小的一行。某个
@@ -119,6 +195,35 @@ SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`ma
 上传准入会在切块前拒绝依赖/构建/缓存目录、含 NUL 的文件，以及 SVG、媒体、压缩包、压缩
 打包产物、source map、lock 文件等非源码产物。被跳过的路径会作为空的 ready blob 持久化，
 避免客户端反复重传。项目清单和测试固件有显式豁免。
+
+## 客户端与 MCP
+
+客户端负责扫描本地工作区、上传变更、维护 checkpoint，并调用服务端检索当前代码。它是
+独立发布的包，详见 <https://github.com/oce-ai/oce-client>：
+
+```powershell
+uv tool install opencontextengine-client
+
+$env:OCE_API_URL = "http://127.0.0.1:8986"
+$env:OCE_API_KEY = "sk-opencontextengine"  # 服务模式请改为服务端 API_KEY
+$env:OCE_WORKSPACE = (Get-Location).Path
+
+oce-client sync
+oce-client retrieve "Where is request authentication implemented?"
+```
+
+需要接入支持 MCP 的 AI 编码工具时，安装 MCP extra 并启动 stdio server：
+
+```powershell
+uv tool install "opencontextengine-client[mcp]"
+oce-client-mcp --workspace C:\path\to\workspace
+```
+
+`oce-client-mcp` 会在后台建立初始索引、监听工作区变化，并把 `codebase-retrieval` 暴露为
+MCP 工具。多个工作区可重复传入 `--workspace`；此时工具调用必须指定对应的
+`workspace_folder`。API 地址、密钥和工作区也可以通过 `OCE_API_URL`、`OCE_API_KEY`、
+`OCE_WORKSPACE`/`OCE_WORKSPACES` 配置。请将密钥放在环境变量或 secret manager 中，不要写进
+MCP 配置文件。
 
 ## API
 

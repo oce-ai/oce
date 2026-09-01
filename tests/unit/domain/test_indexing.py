@@ -290,6 +290,67 @@ class TestEmbedPending:
         assert len(indexing_pipeline.vector_index.items) == 1
         assert indexing_pipeline.vector_index.items[0]["content_hash"] == chunk.content_hash
 
+    async def test_embed_pending_disabled_keeps_pending_and_staging(
+        self, indexing_pipeline, monkeypatch
+    ):
+        """回归：EMBED_ENABLED=false 时，有 chunk 的 blob 必须停在 pending 且保留
+        staging，绝不 mark_ready。
+
+        复现线上静默失效：切块已落库、Milvus 零向量，若此时点亮 READY，检索恒空，
+        且内容寻址幂等会让客户端重传也无法自愈。修复后 blob 保持 pending、原文保留，
+        待开关恢复重新入队即可无损补嵌。
+        """
+        from oce.domain.blob.blob import Blob, BlobStatus
+        from oce.shared.config import get_settings
+
+        indexing_pipeline.chunk_repo.pending.clear()
+        indexing_pipeline.chunk_repo.chunks.clear()
+        indexing_pipeline.vector_index.items.clear()
+        indexing_pipeline.blob_repo.blobs.clear()
+        indexing_pipeline.blob_repo.staging.clear()
+
+        content = "print('hello')\n"
+        name = _blob_name("src/hello.py", content)
+        chunk = Chunk(
+            content_hash=Chunk.compute_hash(content),
+            path="src/hello.py",
+            content=content,
+            start_line=1,
+            end_line=1,
+        )
+        blob = Blob(
+            blob_name=name,
+            path="src/hello.py",
+            status=BlobStatus.PENDING,
+            chunks=[chunk.to_ref()],  # 已切块，只是尚未嵌入
+            content_size=len(content),
+            language="python",
+            file_type="text",
+        )
+        await indexing_pipeline.blob_repo.save(blob)
+        await indexing_pipeline.blob_repo.save_staging(name, content)
+        indexing_pipeline.chunk_repo.pending = [
+            LocatedChunk(name, chunk.content_hash, chunk.path, chunk.content, 1, 1)
+        ]
+
+        # 关掉嵌入开关；get_settings 有 lru_cache，必须 cache_clear 才能让新值穿透。
+        monkeypatch.setenv("EMBED_ENABLED", "false")
+        get_settings.cache_clear()
+        try:
+            embedded = await indexing_pipeline.embed_pending([name])
+        finally:
+            get_settings.cache_clear()  # 避免 false 泄漏到后续用例
+
+        assert embedded == 0
+        assert indexing_pipeline.vector_index.items == []  # 未写任何向量
+        blob = indexing_pipeline.blob_repo.blobs[name]
+        assert blob.status == BlobStatus.PENDING            # 核心：不再假 READY
+        assert name in indexing_pipeline.blob_repo.staging  # 原文保留，供恢复后补嵌
+        assert len(indexing_pipeline.chunk_repo.pending) == 1  # chunk 未被消费
+        assert EVENT_BLOB_READY not in [
+            e.event_type for e in indexing_pipeline._events
+        ]
+
     async def test_embed_pending_no_pending_returns_zero(self, indexing_pipeline):
         name = _blob_name("src/x.py", "print(1)\n")
         await indexing_pipeline.ingest(name, "src/x.py", "print(1)\n")

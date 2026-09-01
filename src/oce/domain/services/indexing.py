@@ -125,7 +125,8 @@ class IndexingPipeline:
         返回嵌入条数。只处理 pending 状态的 Blob。
         如果 blob.chunks 为空,说明 ingest 只写了元数据,需要先从 staging 取原文切块。
 
-        如果嵌入开关关闭(EMBED_ENABLED=false),则只完成切块、不嵌入,blob 直接置 ready。
+        如果嵌入开关关闭(EMBED_ENABLED=false),则只完成切块、保持 pending 且保留
+        staging(绝不置 ready);待开关恢复、blob 重新入队后再补嵌。
         """
         from oce.shared.config import get_settings
 
@@ -171,13 +172,16 @@ class IndexingPipeline:
         # 检查嵌入开关
         settings = get_settings()
         if not settings.embedding.enabled:
-            # 嵌入关闭:只完成切块,直接 ready,不写 Milvus。
-            # 嵌入关闭时 embedder 通常不可用，路径向量无法生成，跳过路径索引写入。
-            for blob in blobs:
-                if blob.status == BlobStatus.PENDING:
-                    blob.mark_ready()
-                    await self.blob_repo.save(blob)
-                    await self.blob_repo.delete_staging(blob.blob_name)
+            # 嵌入关闭：切块已在第一阶段落库，但没有任何向量。此处保持 pending 且保留
+            # staging，绝不 mark_ready —— READY 必须意味着“可被检索”。
+            #
+            # 历史事故：曾在此 mark_ready + delete_staging，使“有 chunk、零向量”的 blob
+            # 被点亮 READY，检索恒空；又因内容寻址幂等（ingest 见 PENDING/READY 只 touch
+            # 返回），客户端重传也无法自愈，形成永久静默失效。
+            #
+            # 保留原文后，待 EMBED_ENABLED 恢复、blob 重新入队即可无损补嵌（chunks 已
+            # 水合，find_pending_for_blobs 按 blob 状态全量重捞）。路径索引依赖 embedder，
+            # 嵌入关闭时无法生成向量，一并跳过。
             return 0
 
         # 第二阶段:嵌入

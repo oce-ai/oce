@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from oce.application.credential_admin import (
     CredentialCreate,
+    CredentialDuplicate,
     CredentialRecord,
     CredentialUpdate,
 )
@@ -142,21 +143,24 @@ class SqlCredentialAdminStore:
             return True
 
     async def duplicate(
-        self, credential_id: int, *, name: str, api_key: str
+        self, credential_id: int, changes: CredentialDuplicate
     ) -> CredentialRecord | None:
         async with self._session_factory() as session:
             src = await session.get(ModelCredentialModel, credential_id)
             if src is None:
                 return None
+            # 先继承源行全部标量字段，再用非 None 的覆盖字段替换（name 也走覆盖）。
+            values = {field: getattr(src, field) for field in _SCALAR_FIELDS}
+            for field in _SCALAR_FIELDS:
+                override = getattr(changes, field)
+                if override is not None:
+                    values[field] = override
+            # api_key 省略即复用源 key，这正是“同一把 key 换用途”复制的关键。
+            api_key = changes.api_key if changes.api_key is not None else src.api_key
             clone = ModelCredentialModel(
-                name=name,
                 api_key=api_key,
                 api_key_hash=_hash_key(api_key),
-                **{
-                    field: getattr(src, field)
-                    for field in _SCALAR_FIELDS
-                    if field != "name"
-                },
+                **values,
             )
         return await self._persist_new(clone)
 

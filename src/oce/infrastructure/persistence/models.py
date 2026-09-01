@@ -23,8 +23,9 @@ from oce.shared.database.session import Base
 class ModelCredentialModel(Base):
     """多用途模型凭据：一行 = 一个 (kind, 账号) 通道。
 
-    kind ∈ embed | rerank | llm_rerank | query_rewrite | intent。同一把 key 服务多个
-    用途时按 kind 分行（唯一约束是 (kind, api_key_hash)）。endpoint 语义随 kind 变化：
+    kind ∈ embed | rerank | llm_rerank | query_rewrite | intent。同一把 key 可服务多个
+    用途/模型：唯一约束是 (kind, model, api_key_hash)，故同 key 跨 kind、同 kind 下同 key
+    挂不同 model 都允许，只挡住 kind+model+key 三者全同的纯重复行。endpoint 语义随 kind 变化：
     embed/rerank 存完整 URL（/v1/embeddings、/v1/rerank），chat 三类（llm_rerank/
     query_rewrite/intent）存 base_url（/v1）。resolve 时按 kind + status='active' +
     priority 取最高优先级一条，取不到回落各自的环境变量。kind 专属参数列对其它 kind 恒为
@@ -70,7 +71,12 @@ class ModelCredentialModel(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("kind", "api_key_hash", name="uq_model_credentials_kind_key"),
+        UniqueConstraint(
+            "kind",
+            "model",
+            "api_key_hash",
+            name="uq_model_credentials_kind_model_key",
+        ),
         Index(
             "idx_model_credentials_kind_status_priority",
             "kind",

@@ -66,10 +66,12 @@ class StubCredentialApp:
     async def delete_credential(self, credential_id):
         return credential_id != 999
 
-    async def duplicate_credential(self, credential_id, *, name, api_key):
+    async def duplicate_credential(self, credential_id, changes):
         if credential_id == 999:
             return None
-        return _record(3, name, last4=api_key[-4:])
+        # 省略 api_key 表示继承源 key，这里用尾 4 位 1234 代表继承结果。
+        last4 = changes.api_key[-4:] if changes.api_key else "1234"
+        return _record(3, changes.name or "primary", last4=last4)
 
 
 def _client(application) -> httpx.AsyncClient:
@@ -127,6 +129,19 @@ async def test_duplicate_credential_201():
         )
     assert response.status_code == 201
     assert response.json()["name"] == "secondary"
+
+
+async def test_duplicate_credential_inherits_key_and_overrides_kind():
+    """省略 api_key + 覆盖 kind：接口应接受可选字段并成功复制。"""
+    async with _client(StubCredentialApp()) as client:
+        response = await client.post(
+            "/admin/credentials/1/duplicate",
+            headers=_AUTH,
+            json={"name": "as-rerank", "kind": "rerank"},
+        )
+    assert response.status_code == 201
+    assert response.json()["name"] == "as-rerank"
+    assert response.json()["api_key_last4"] == "1234"
 
 
 async def test_create_conflict_returns_409():

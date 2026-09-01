@@ -226,10 +226,35 @@ class CredentialUpdateRequest(BaseModel):
 
 
 class CredentialDuplicateRequest(BaseModel):
-    """复制源凭据的渠道配置，仅换 name + api_key。"""
+    """从源凭据克隆一个新通道：所有字段可选，提供即覆盖，省略即继承源行。
 
-    name: str = Field(min_length=1)
-    api_key: str = Field(min_length=1)
+    省略 api_key 即复用源 key，配合覆盖 kind/model 可把某把 key 的通道复制成别的用途
+    （如复制 embed 行改成 rerank），不再撞唯一约束。
+    """
+
+    name: str | None = Field(default=None, min_length=1)
+    api_key: str | None = Field(default=None, min_length=1)
+    kind: CredentialKind | None = None
+    provider: str | None = None
+    status: Literal["active", "disabled"] | None = None
+    priority: int | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    timeout_seconds: int | None = None
+    rate_limit: int | None = None
+    note: str | None = None
+    dimensions: int | None = None
+    max_batch_size: int | None = None
+    max_batch_chars: int | None = None
+    max_input_chars: int | None = None
+    input_overlap_chars: int | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
 
 
 class QueueStatusResponse(BaseModel):

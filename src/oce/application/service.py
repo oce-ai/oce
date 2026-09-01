@@ -23,6 +23,7 @@ from oce.application.commands.requeue import RequeueStaleCommand, RequeueStaleRe
 from oce.application.credential_admin import (
     CreateCredentialCommand,
     CredentialCreate,
+    CredentialDuplicate,
     CredentialRecord,
     CredentialUpdate,
     DeleteCredentialCommand,
@@ -220,8 +221,8 @@ class RetrievalApplication:
         return await self._commands.execute(DeleteCredentialCommand(credential_id))
 
     async def duplicate_credential(
-        self, credential_id: int, *, name: str, api_key: str
+        self, credential_id: int, changes: CredentialDuplicate
     ) -> CredentialRecord | None:
         return await self._commands.execute(
-            DuplicateCredentialCommand(credential_id, name, api_key)
+            DuplicateCredentialCommand(credential_id, changes)
         )

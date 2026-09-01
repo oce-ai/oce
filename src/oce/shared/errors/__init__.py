@@ -55,11 +55,11 @@ class NeedsResetError(ApplicationError):
 
 
 class CredentialConflictError(ApplicationError):
-    """新增/复制凭据时 api_key 已存在（api_key_hash 唯一冲突）。"""
+    """新增/复制凭据命中唯一约束 (kind, model, api_key_hash)：同 kind+model 下该 key 已存在。"""
 
     def __init__(self, reason: str | None = None) -> None:
         super().__init__(
-            reason or "凭据的 api_key 已存在",
+            reason or "该 kind + model 下已存在相同 api_key 的凭据",
             code="CREDENTIAL_CONFLICT",
         )
 

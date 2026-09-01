@@ -109,6 +109,39 @@ class CredentialUpdate:
     num_rewrites: int | None = None
 
 
+@dataclass(frozen=True)
+class CredentialDuplicate:
+    """复制源凭据：字段为 None 表示继承源行，非 None 则覆盖。
+
+    典型用法是克隆同一把 key 的通道再改用途：省略 api_key 即复用源 key，只覆盖
+    kind/model（等）就能把 embed 行复制成 rerank 行而不撞唯一约束。
+    """
+
+    kind: str | None = None
+    name: str | None = None
+    api_key: str | None = None
+    provider: str | None = None
+    status: str | None = None
+    priority: int | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    timeout_seconds: int | None = None
+    rate_limit: int | None = None
+    note: str | None = None
+    dimensions: int | None = None
+    max_batch_size: int | None = None
+    max_batch_chars: int | None = None
+    max_input_chars: int | None = None
+    input_overlap_chars: int | None = None
+    top_n: int | None = None
+    min_score: float | None = None
+    tpm_limit: int | None = None
+    max_candidates: int | None = None
+    output_top_k: int | None = None
+    snippet_chars: int | None = None
+    num_rewrites: int | None = None
+
+
 class CredentialAdminStore(Protocol):
     async def list(self) -> list[CredentialRecord]: ...
     async def create(self, data: CredentialCreate) -> CredentialRecord: ...
@@ -117,7 +150,7 @@ class CredentialAdminStore(Protocol):
     ) -> CredentialRecord | None: ...
     async def delete(self, credential_id: int) -> bool: ...
     async def duplicate(
-        self, credential_id: int, *, name: str, api_key: str
+        self, credential_id: int, changes: CredentialDuplicate
     ) -> CredentialRecord | None: ...
 
 
@@ -145,8 +178,7 @@ class DeleteCredentialCommand(Command):
 @dataclass(frozen=True)
 class DuplicateCredentialCommand(Command):
     credential_id: int
-    name: str
-    api_key: str
+    changes: CredentialDuplicate
 
 
 class ListCredentialsQueryHandler:
@@ -191,5 +223,5 @@ class DuplicateCredentialCommandHandler:
         self, command: DuplicateCredentialCommand
     ) -> CredentialRecord | None:
         return await self._store.duplicate(
-            command.credential_id, name=command.name, api_key=command.api_key
+            command.credential_id, command.changes
         )

@@ -28,6 +28,7 @@ from oce.api.schemas import (
 from oce.application.container import get_container
 from oce.application.credential_admin import (
     CredentialCreate,
+    CredentialDuplicate,
     CredentialRecord,
     CredentialUpdate,
 )
@@ -110,7 +111,7 @@ async def duplicate_credential(
 ) -> CredentialResponse:
     try:
         record = await application.duplicate_credential(
-            credential_id, name=request.name, api_key=request.api_key
+            credential_id, CredentialDuplicate(**request.model_dump())
         )
     except CredentialConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

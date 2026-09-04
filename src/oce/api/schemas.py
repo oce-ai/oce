@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class FindMissingRequest(BaseModel):
@@ -127,6 +127,219 @@ class MonitoringStatsResponse(BaseModel):
     tokens_total: int = 0
     retrieval: RetrievalStatsResponse = Field(default_factory=RetrievalStatsResponse)
     resource: ResourceSnapshotResponse | None = None
+
+
+# ---------------------------------------------------------------- 报表响应模型
+# 字段与 shared.reports_read 的 dataclass 同名，便于 model_validate(from_attributes)。
+
+
+class ApiCallBucketResponse(BaseModel):
+    ts: datetime
+    count: int = 0
+    error_count: int = 0
+    avg_latency_ms: float = 0.0
+    p50_latency_ms: int = 0
+    p95_latency_ms: int = 0
+    max_latency_ms: int = 0
+
+
+class EndpointStatResponse(BaseModel):
+    endpoint: str
+    method: str
+    count: int = 0
+    error_count: int = 0
+    error_rate: float = 0.0
+    avg_latency_ms: float = 0.0
+    p95_latency_ms: int = 0
+
+
+class ErrorStatResponse(BaseModel):
+    status_code: int
+    error_type: str | None = None
+    count: int = 0
+    last_ts: datetime | None = None
+
+
+class ApiCallsReportResponse(BaseModel):
+    window_hours: int
+    bucket: str
+    buckets: list[ApiCallBucketResponse] = Field(default_factory=list)
+    endpoints: list[EndpointStatResponse] = Field(default_factory=list)
+    errors: list[ErrorStatResponse] = Field(default_factory=list)
+
+
+class RetrievalBucketResponse(BaseModel):
+    ts: datetime
+    count: int = 0
+    empty_count: int = 0
+    empty_rate: float = 0.0
+    avg_hit_count: float = 0.0
+    avg_total_ms: float = 0.0
+    p95_total_ms: int = 0
+
+
+class StageStatResponse(BaseModel):
+    stage: str
+    count: int = 0
+    avg_ms: float = 0.0
+    p95_ms: int = 0
+    max_ms: int = 0
+
+
+class IntentStatResponse(BaseModel):
+    intent: str | None = None
+    count: int = 0
+    empty_count: int = 0
+    empty_rate: float = 0.0
+    avg_total_ms: float = 0.0
+    path_boosted_count: int = 0
+
+
+class ScopeBucketStatResponse(BaseModel):
+    label: str
+    count: int = 0
+    empty_rate: float = 0.0
+    p95_total_ms: int = 0
+
+
+class RetrievalReportResponse(BaseModel):
+    window_hours: int
+    bucket: str
+    buckets: list[RetrievalBucketResponse] = Field(default_factory=list)
+    stages: list[StageStatResponse] = Field(default_factory=list)
+    intents: list[IntentStatResponse] = Field(default_factory=list)
+    scopes: list[ScopeBucketStatResponse] = Field(default_factory=list)
+
+
+class RetrievalQueryDetailResponse(BaseModel):
+    ts: datetime
+    source: str
+    query_text: str | None = None
+    total_ms: int
+    hit_count: int
+    scope_size: int | None = None
+    intent: str | None = None
+    path_boosted: bool = False
+
+
+class RetrievalQueryListResponse(BaseModel):
+    window_hours: int
+    items: list[RetrievalQueryDetailResponse] = Field(default_factory=list)
+
+
+class TokenBucketResponse(BaseModel):
+    ts: datetime
+    kind: str
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class ModelTokenStatResponse(BaseModel):
+    # 字段名 model 与 pydantic 保护前缀冲突，显式放开以保持与读模型同名
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str
+    kind: str
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    avg_tokens_per_call: float = 0.0
+
+
+class CredentialTokenStatResponse(BaseModel):
+    credential_id: int | None = None
+    calls: int = 0
+    total_tokens: int = 0
+
+
+class TokensReportResponse(BaseModel):
+    window_hours: int
+    bucket: str
+    buckets: list[TokenBucketResponse] = Field(default_factory=list)
+    models: list[ModelTokenStatResponse] = Field(default_factory=list)
+    credentials: list[CredentialTokenStatResponse] = Field(default_factory=list)
+    tokens_total: int = 0
+
+
+class CountStatResponse(BaseModel):
+    key: str
+    count: int = 0
+
+
+class IndexInventoryReportResponse(BaseModel):
+    blob_total: int = 0
+    blob_by_status: list[CountStatResponse] = Field(default_factory=list)
+    blob_by_language: list[CountStatResponse] = Field(default_factory=list)
+    blob_retrying: int = 0
+    blob_content_bytes: int = 0
+    chunk_total: int = 0
+    chunk_pending_embed: int = 0
+    chunk_by_type: list[CountStatResponse] = Field(default_factory=list)
+    chunk_content_bytes: int = 0
+    blob_chunk_links: int = 0
+    symbol_total: int = 0
+    symbol_by_kind: list[CountStatResponse] = Field(default_factory=list)
+    chain_total: int = 0
+    chain_stale_7d: int = 0
+    chain_stale_30d: int = 0
+    staging_rows: int = 0
+
+
+class ResourceBucketResponse(BaseModel):
+    ts: datetime
+    avg_cpu_percent: float = 0.0
+    max_cpu_percent: float = 0.0
+    avg_mem_percent: float = 0.0
+    max_mem_rss_bytes: int = 0
+    disk_data_bytes: int = 0
+    disk_free_bytes: int = 0
+
+
+class ResourcesReportResponse(BaseModel):
+    window_hours: int
+    bucket: str
+    buckets: list[ResourceBucketResponse] = Field(default_factory=list)
+    disk_total_bytes: int = 0
+    disk_growth_bytes_per_day: float = 0.0
+    disk_days_until_full: float | None = None
+
+
+class TableSpaceStatResponse(BaseModel):
+    table: str
+    bytes: int = 0
+    rows: int = 0
+    approximate: bool = False
+
+
+class DataFileStatResponse(BaseModel):
+    name: str
+    bytes: int = 0
+
+
+class VectorCollectionStatResponse(BaseModel):
+    name: str
+    rows: int = 0
+    est_bytes: int = 0
+
+
+class VectorStoreStatResponse(BaseModel):
+    mode: str = "unavailable"
+    collections: list[VectorCollectionStatResponse] = Field(default_factory=list)
+    file_bytes: int = 0
+    error: str | None = None
+
+
+class StorageReportResponse(BaseModel):
+    dialect: str = ""
+    total_table_bytes: int = 0
+    tables: list[TableSpaceStatResponse] = Field(default_factory=list)
+    data_dir: str | None = None
+    data_files: list[DataFileStatResponse] = Field(default_factory=list)
+    data_dir_total_bytes: int = 0
+    vector: VectorStoreStatResponse | None = None
 
 
 # 凭据用途：embed/rerank 走 REST（/v1/embeddings、/v1/rerank）；后三类走 chat。

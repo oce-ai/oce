@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from oce.api.router import get_application
 from oce.api.schemas import (
     ApiCallStatsResponse,
+    ApiCallsReportResponse,
     CredentialCreateRequest,
     CredentialDuplicateRequest,
     CredentialListResponse,
@@ -14,6 +15,7 @@ from oce.api.schemas import (
     CredentialUpdateRequest,
     GcRequest,
     GcResponse,
+    IndexInventoryReportResponse,
     MonitoringStatsResponse,
     QueueResetRequest,
     QueueResetResponse,
@@ -22,8 +24,14 @@ from oce.api.schemas import (
     RequeueStaleRequest,
     RequeueStaleResponse,
     ResourceSnapshotResponse,
+    ResourcesReportResponse,
+    RetrievalQueryDetailResponse,
+    RetrievalQueryListResponse,
+    RetrievalReportResponse,
     RetrievalStatsResponse,
+    StorageReportResponse,
     TokenKindStatsResponse,
+    TokensReportResponse,
 )
 from oce.application.container import get_container
 from oce.application.credential_admin import (
@@ -253,3 +261,129 @@ async def admin_stats(
             else None
         ),
     )
+
+
+# ---------------------------------------------------------------- 报表端点
+# 入参在路由层收敛：窗口 1..720h、明细 1..500 行、分桶仅 hour/day。
+
+
+def _clamp_window(window_hours: int) -> int:
+    return max(1, min(window_hours, 720))
+
+
+def _clamp_limit(limit: int) -> int:
+    return max(1, min(limit, 500))
+
+
+def _validate_bucket(bucket: str) -> str:
+    if bucket not in ("hour", "day"):
+        raise HTTPException(status_code=422, detail="bucket must be 'hour' or 'day'")
+    return bucket
+
+
+@admin_router.get("/reports/api-calls", response_model=ApiCallsReportResponse)
+async def report_api_calls(
+    window_hours: int = 24,
+    bucket: str = "hour",
+    application: RetrievalApplication = Depends(get_application),
+) -> ApiCallsReportResponse:
+    report = await application.api_calls_report(
+        window_hours=_clamp_window(window_hours), bucket=_validate_bucket(bucket)
+    )
+    return ApiCallsReportResponse.model_validate(report, from_attributes=True)
+
+
+@admin_router.get("/reports/retrieval", response_model=RetrievalReportResponse)
+async def report_retrieval(
+    window_hours: int = 24,
+    bucket: str = "hour",
+    application: RetrievalApplication = Depends(get_application),
+) -> RetrievalReportResponse:
+    report = await application.retrieval_report(
+        window_hours=_clamp_window(window_hours), bucket=_validate_bucket(bucket)
+    )
+    return RetrievalReportResponse.model_validate(report, from_attributes=True)
+
+
+@admin_router.get(
+    "/reports/retrieval/slow-queries", response_model=RetrievalQueryListResponse
+)
+async def report_slow_queries(
+    window_hours: int = 24,
+    limit: int = 50,
+    application: RetrievalApplication = Depends(get_application),
+) -> RetrievalQueryListResponse:
+    window = _clamp_window(window_hours)
+    items = await application.slow_queries_report(
+        window_hours=window, limit=_clamp_limit(limit)
+    )
+    return RetrievalQueryListResponse(
+        window_hours=window,
+        items=[
+            RetrievalQueryDetailResponse.model_validate(item, from_attributes=True)
+            for item in items
+        ],
+    )
+
+
+@admin_router.get(
+    "/reports/retrieval/empty-queries", response_model=RetrievalQueryListResponse
+)
+async def report_empty_queries(
+    window_hours: int = 24,
+    limit: int = 50,
+    application: RetrievalApplication = Depends(get_application),
+) -> RetrievalQueryListResponse:
+    window = _clamp_window(window_hours)
+    items = await application.empty_queries_report(
+        window_hours=window, limit=_clamp_limit(limit)
+    )
+    return RetrievalQueryListResponse(
+        window_hours=window,
+        items=[
+            RetrievalQueryDetailResponse.model_validate(item, from_attributes=True)
+            for item in items
+        ],
+    )
+
+
+@admin_router.get("/reports/tokens", response_model=TokensReportResponse)
+async def report_tokens(
+    window_hours: int = 24,
+    bucket: str = "hour",
+    application: RetrievalApplication = Depends(get_application),
+) -> TokensReportResponse:
+    report = await application.tokens_report(
+        window_hours=_clamp_window(window_hours), bucket=_validate_bucket(bucket)
+    )
+    return TokensReportResponse.model_validate(report, from_attributes=True)
+
+
+@admin_router.get(
+    "/reports/index-inventory", response_model=IndexInventoryReportResponse
+)
+async def report_index_inventory(
+    application: RetrievalApplication = Depends(get_application),
+) -> IndexInventoryReportResponse:
+    report = await application.index_inventory_report()
+    return IndexInventoryReportResponse.model_validate(report, from_attributes=True)
+
+
+@admin_router.get("/reports/resources", response_model=ResourcesReportResponse)
+async def report_resources(
+    window_hours: int = 24,
+    bucket: str = "hour",
+    application: RetrievalApplication = Depends(get_application),
+) -> ResourcesReportResponse:
+    report = await application.resources_report(
+        window_hours=_clamp_window(window_hours), bucket=_validate_bucket(bucket)
+    )
+    return ResourcesReportResponse.model_validate(report, from_attributes=True)
+
+
+@admin_router.get("/reports/storage", response_model=StorageReportResponse)
+async def report_storage(
+    application: RetrievalApplication = Depends(get_application),
+) -> StorageReportResponse:
+    report = await application.storage_report()
+    return StorageReportResponse.model_validate(report, from_attributes=True)

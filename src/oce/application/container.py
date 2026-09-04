@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from loguru import logger
 
@@ -48,6 +49,24 @@ from oce.application.queries.queue import (
     QueueStatusQuery,
     QueueStatusQueryHandler,
 )
+from oce.application.queries.reports import (
+    ApiCallsReportQuery,
+    ApiCallsReportQueryHandler,
+    EmptyQueriesQuery,
+    EmptyQueriesQueryHandler,
+    IndexInventoryQuery,
+    IndexInventoryQueryHandler,
+    ResourcesReportQuery,
+    ResourcesReportQueryHandler,
+    RetrievalReportQuery,
+    RetrievalReportQueryHandler,
+    SlowQueriesQuery,
+    SlowQueriesQueryHandler,
+    StorageReportQuery,
+    StorageReportQueryHandler,
+    TokensReportQuery,
+    TokensReportQueryHandler,
+)
 from oce.application.queries.search import SearchQuery, SearchQueryHandler
 from oce.application.queries.stats import (
     MonitoringStatsQuery,
@@ -82,11 +101,13 @@ from oce.infrastructure.metrics.resource_sampler import (
 )
 from oce.infrastructure.metrics.sql_metrics_sink import SqlMetricsSink
 from oce.infrastructure.metrics.stats_store import SqlMonitoringStatsReader
+from oce.infrastructure.metrics.report_store import SqlReportsReader
 from oce.infrastructure.queue.redis_queue import RedisQueue
 from oce.shared.config import get_settings
 from oce.shared.database.session import async_session_factory
 from oce.shared.logging import DATA_DIR_ENV
 from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
+from oce.shared.reports_read import VectorCollectionStat, VectorStoreStat
 
 
 class _CredentialRuntime:
@@ -411,6 +432,55 @@ class Container:
                 SqlMonitoringStatsReader(async_session_factory)
             ),
         )
+        # 报表 reader 共享一个实例：只读聚合，无状态，8 个 handler 复用。
+        # 向量库统计以异步闭包注入，让 reader 保持纯 SQL 模块不依赖 milvus infra；
+        # 异常在 reader 侧统一降级为 mode="unavailable"，这里放心 propagate。
+        milvus_settings = settings.milvus
+        search_store = self.search_store
+
+        async def _vector_stats() -> VectorStoreStat:
+            local = not milvus_settings.endpoint.startswith(("http://", "https://"))
+            rows = await search_store.client.collection_stats()
+            collections = tuple(
+                VectorCollectionStat(
+                    name=name,
+                    rows=count,
+                    est_bytes=count * milvus_settings.dense_dim * 4,
+                )
+                for name, count in rows
+            )
+            file_bytes = 0
+            if local:
+                lite_path = Path(milvus_settings.endpoint)
+                if lite_path.is_file():
+                    file_bytes = lite_path.stat().st_size
+            return VectorStoreStat(
+                mode="lite" if local else "server",
+                collections=collections,
+                file_bytes=file_bytes,
+            )
+
+        reports_reader = SqlReportsReader(
+            async_session_factory,
+            data_dir=os.environ.get(DATA_DIR_ENV),
+            vector_stats=_vector_stats,
+        )
+        query_bus.register(
+            ApiCallsReportQuery, ApiCallsReportQueryHandler(reports_reader)
+        )
+        query_bus.register(
+            RetrievalReportQuery, RetrievalReportQueryHandler(reports_reader)
+        )
+        query_bus.register(SlowQueriesQuery, SlowQueriesQueryHandler(reports_reader))
+        query_bus.register(EmptyQueriesQuery, EmptyQueriesQueryHandler(reports_reader))
+        query_bus.register(TokensReportQuery, TokensReportQueryHandler(reports_reader))
+        query_bus.register(
+            IndexInventoryQuery, IndexInventoryQueryHandler(reports_reader)
+        )
+        query_bus.register(
+            ResourcesReportQuery, ResourcesReportQueryHandler(reports_reader)
+        )
+        query_bus.register(StorageReportQuery, StorageReportQueryHandler(reports_reader))
         query_bus.register(
             ListCredentialsQuery,
             ListCredentialsQueryHandler(credential_admin_store),

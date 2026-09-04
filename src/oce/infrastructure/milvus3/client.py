@@ -258,6 +258,29 @@ class Milvus3Client:
         logger.info("Deleted {} vectors for blob {}", deleted, blob_name)
         return deleted
 
+    async def collection_stats(self) -> list[tuple[str, int]]:
+        """返回 [(collection_name, row_count), ...]，覆盖主 collection 与路径索引 collection。
+
+        只读统计：不触发 initialize()/_ensure_collection，不存在的 collection 直接跳过，
+        单个 collection 统计失败也跳过（不让报表旁路抛错）。
+        """
+        stats: list[tuple[str, int]] = []
+        for name in (
+            self.settings.collection_name,
+            self.settings.path_collection_name,
+        ):
+            try:
+                if not await self._call("has_collection", name):
+                    continue
+                result = await self._call("get_collection_stats", name)
+                # pymilvus 返回 {"row_count": <int|str>}；统一 int() 兜底
+                row_count = int(result.get("row_count", 0))
+                stats.append((name, row_count))
+            except Exception as exc:
+                logger.warning("Failed to get stats for collection {}: {}", name, exc)
+                continue
+        return stats
+
     async def close(self):
         """关闭客户端连接"""
         await self._call("close")

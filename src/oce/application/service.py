@@ -32,6 +32,16 @@ from oce.application.credential_admin import (
     UpdateCredentialCommand,
 )
 from oce.application.queries.queue import QueueStatusQuery, QueueStatusResult
+from oce.application.queries.reports import (
+    ApiCallsReportQuery,
+    EmptyQueriesQuery,
+    IndexInventoryQuery,
+    ResourcesReportQuery,
+    RetrievalReportQuery,
+    SlowQueriesQuery,
+    StorageReportQuery,
+    TokensReportQuery,
+)
 from oce.application.queries.search import SearchQuery
 from oce.application.queries.stats import MonitoringStatsQuery
 from oce.application.queries.status import (
@@ -45,6 +55,15 @@ from oce.application.queries.status import (
 from oce.domain.services.formatter import format_retrieval
 from oce.domain.services.search import SearchHit
 from oce.shared.metrics_read import MonitoringStats
+from oce.shared.reports_read import (
+    ApiCallsReport,
+    IndexInventoryReport,
+    ResourcesReport,
+    RetrievalQueryDetail,
+    RetrievalReport,
+    StorageReport,
+    TokensReport,
+)
 
 
 def compute_blob_name(path: str, content: str) -> str:
@@ -183,6 +202,42 @@ class RetrievalApplication:
 
     async def monitoring_stats(self, *, window_hours: int = 24) -> MonitoringStats:
         return await self._queries.ask(MonitoringStatsQuery(window_hours))
+
+    async def api_calls_report(
+        self, *, window_hours: int = 24, bucket: str = "hour"
+    ) -> ApiCallsReport:
+        return await self._queries.ask(ApiCallsReportQuery(window_hours, bucket))
+
+    async def retrieval_report(
+        self, *, window_hours: int = 24, bucket: str = "hour"
+    ) -> RetrievalReport:
+        return await self._queries.ask(RetrievalReportQuery(window_hours, bucket))
+
+    async def slow_queries_report(
+        self, *, window_hours: int = 24, limit: int = 50
+    ) -> tuple[RetrievalQueryDetail, ...]:
+        return await self._queries.ask(SlowQueriesQuery(window_hours, limit))
+
+    async def empty_queries_report(
+        self, *, window_hours: int = 24, limit: int = 50
+    ) -> tuple[RetrievalQueryDetail, ...]:
+        return await self._queries.ask(EmptyQueriesQuery(window_hours, limit))
+
+    async def tokens_report(
+        self, *, window_hours: int = 24, bucket: str = "hour"
+    ) -> TokensReport:
+        return await self._queries.ask(TokensReportQuery(window_hours, bucket))
+
+    async def index_inventory_report(self) -> IndexInventoryReport:
+        return await self._queries.ask(IndexInventoryQuery())
+
+    async def resources_report(
+        self, *, window_hours: int = 24, bucket: str = "hour"
+    ) -> ResourcesReport:
+        return await self._queries.ask(ResourcesReportQuery(window_hours, bucket))
+
+    async def storage_report(self) -> StorageReport:
+        return await self._queries.ask(StorageReportQuery())
 
     async def queue_status(self) -> QueueStatusResult:
         return await self._queries.ask(QueueStatusQuery())

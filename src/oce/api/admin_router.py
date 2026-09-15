@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from oce.api.router import get_application
@@ -25,6 +27,9 @@ from oce.api.schemas import (
     RequeueStaleResponse,
     ResourceSnapshotResponse,
     ResourcesReportResponse,
+    RetrievalConfigEffective,
+    RetrievalConfigPatchRequest,
+    RetrievalConfigResponse,
     RetrievalQueryDetailResponse,
     RetrievalQueryListResponse,
     RetrievalReportResponse,
@@ -33,6 +38,7 @@ from oce.api.schemas import (
     TokenKindStatsResponse,
     TokensReportResponse,
 )
+from oce.application.commands.reconfigure import HOT_CONFIG_ENV, HotConfigError
 from oce.application.container import get_container
 from oce.application.credential_admin import (
     CredentialCreate,
@@ -137,6 +143,72 @@ async def reload_credentials(
         reloaded=result.reloaded,
         pool_size=result.pool_size,
         reason=result.reason,
+    )
+
+
+def hot_config_allowed() -> bool:
+    """热改闸：仅当启动时被设了 ``OCE_BENCH_HOT_CONFIG=allow`` 才放行。
+
+    由 ``oce bench serve`` 注入；正常 ``oce serve`` 永不设置，故检索行为**不可能**被
+    线上误热改。做成 FastAPI 依赖（而非在端点内读 env）以便测试 dependency_overrides。
+    """
+    return os.environ.get(HOT_CONFIG_ENV, "").strip().lower() == "allow"
+
+
+@admin_router.get("/bench/retrieval-config", response_model=RetrievalConfigResponse)
+async def get_retrieval_config(
+    application: RetrievalApplication = Depends(get_application),
+    allowed: bool = Depends(hot_config_allowed),
+) -> RetrievalConfigResponse:
+    """读取当前生效的检索配置 + generation（read-after-write 校验）。
+
+    读取是只读的，但仍受同一道闸：未开热改的部署不应暴露这套评测语义。
+    """
+    if not allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"hot retrieval config disabled; start with {HOT_CONFIG_ENV}=allow",
+        )
+    result = await application.retrieval_config()
+    return RetrievalConfigResponse(
+        generation=result.generation,
+        effective=RetrievalConfigEffective(**result.effective),
+    )
+
+
+@admin_router.post("/bench/retrieval-config", response_model=RetrievalConfigResponse)
+async def post_retrieval_config(
+    request: RetrievalConfigPatchRequest,
+    application: RetrievalApplication = Depends(get_application),
+    allowed: bool = Depends(hot_config_allowed),
+) -> RetrievalConfigResponse:
+    """热改一组 L0 检索参数：重建 pipeline 并原子重注册，不重启不重建索引。
+
+    未知 key / 越界值 → 422（HotConfigError 带 code + details，便于 harness 精确定位）。
+    """
+    if not allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"hot retrieval config disabled; start with {HOT_CONFIG_ENV}=allow",
+        )
+    try:
+        result = await application.reconfigure_retrieval(
+            retrieval_patch=request.retrieval,
+            flags=request.flags,
+            milvus_patch=request.milvus,
+            rerank_patch=request.rerank,
+        )
+    except HotConfigError as exc:
+        # 422 而非 400：语义是「请求格式/取值不合法」，与 FastAPI 校验错误同类。
+        # details 里带 code + unknown/errors，harness 据此区分拼写错 vs 越界。
+        raise HTTPException(
+            status_code=422,
+            detail={"message": exc.message, "code": exc.code, **exc.details},
+        ) from exc
+    return RetrievalConfigResponse(
+        generation=result.generation,
+        effective=RetrievalConfigEffective(**result.effective),
+        reranker_reloaded=result.reranker_reloaded,
     )
 
 

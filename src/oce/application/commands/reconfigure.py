@@ -137,6 +137,11 @@ HOT_MILVUS_FIELDS: frozenset[str] = frozenset({"hnsw_ef_search"})
 # api_key 属凭证范畴（走 /admin/credentials），不在此。enabled 由 HOT_FLAG_FIELDS 管。
 HOT_RERANK_FIELDS: frozenset[str] = frozenset({"top_n", "min_score"})
 
+# `oce bench serve` 注入此环境变量为 "allow" 才放行热改端点；正常 `oce serve` 永不设置，
+# 故 /admin/bench/retrieval-config 在非评测部署下一律 409（闸见 admin_router.hot_config_allowed）。
+# 单一真源：admin_router 读取、bench CLI 注入都引用此常量。
+HOT_CONFIG_ENV = "OCE_BENCH_HOT_CONFIG"
+
 
 def _validate_keys(
     patch: Mapping[str, Any],

@@ -42,6 +42,36 @@ class ReloadCredentialsResponse(BaseModel):
     reason: str | None = None
 
 
+class RetrievalConfigPatchRequest(BaseModel):
+    """L0 检索参数热改请求。
+
+    值一律用 ``Any``：热改语义要求字符串能被 pydantic 强转（CLI ``--param K=V`` 传
+    ``"30"`` / ``"false"``），故不在此层约束类型；key 白名单与范围校验由 application 层
+    reconfigurator 负责（未知 key → 422，越界 → 422）。四组对应 HOT_*_FIELDS。
+    """
+
+    retrieval: dict[str, Any] = Field(default_factory=dict)
+    flags: dict[str, Any] = Field(default_factory=dict)
+    milvus: dict[str, Any] = Field(default_factory=dict)
+    rerank: dict[str, Any] = Field(default_factory=dict)
+
+
+class RetrievalConfigEffective(BaseModel):
+    """当前实际生效的热参数快照（只读白名单字段，绝不含密钥）。"""
+
+    retrieval: dict[str, Any] = Field(default_factory=dict)
+    flags: dict[str, Any] = Field(default_factory=dict)
+    milvus: dict[str, Any] = Field(default_factory=dict)
+    rerank: dict[str, Any] = Field(default_factory=dict)
+
+
+class RetrievalConfigResponse(BaseModel):
+    generation: int
+    effective: RetrievalConfigEffective
+    # 仅 POST 返回：本次是否重建了 reranker delegate（GET 恒为 None）
+    reranker_reloaded: bool | None = None
+
+
 class BlobsPayload(BaseModel):
     checkpoint_id: str = ""
     added_blobs: list[str] = Field(default_factory=list)

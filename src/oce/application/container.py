@@ -29,6 +29,13 @@ from oce.application.commands.queue_admin import (
     ResetQueueCommand,
     ResetQueueCommandHandler,
 )
+from oce.application.commands.reconfigure import (
+    ReconfigureRetrievalCommand,
+    ReconfigureRetrievalCommandHandler,
+    RetrievalConfigQuery,
+    RetrievalConfigQueryHandler,
+    RetrievalReconfigurator,
+)
 from oce.application.commands.requeue import (
     RequeueStaleCommand,
     RequeueStaleCommandHandler,
@@ -112,6 +119,14 @@ class _CredentialRuntime:
     def __init__(self, embedder, reranker, llm_clients=()) -> None:
         self._embedder = embedder
         self._reranker = reranker
+        self._llm_clients = [client for client in llm_clients if client is not None]
+
+    def set_llm_clients(self, llm_clients) -> None:
+        """热重载换栈后同步 LLM client 覆盖面（llm_rerank 开关会增减 client）。
+
+        必须在 query_bus 原子重注册之后调用：reload 命令据此刷新当前 in-force 的
+        client 集合，否则会对已退休的旧 client 调 reload、漏掉新建的。
+        """
         self._llm_clients = [client for client in llm_clients if client is not None]
 
     async def reload(self) -> int:
@@ -432,6 +447,32 @@ class Container:
         query_bus.register(
             QueueStatusQuery,
             QueueStatusQueryHandler(self._uow_factory, self.queue),
+        )
+
+        # L0 检索参数热重载器：复用同一份 deps（昂贵对象不重建）+ query_bus（原子重注册
+        # 落点）+ live settings（milvus/rerank 就地写回的目标）。generation 从 0 起。
+        def _on_swap(new_stack) -> None:
+            # 热重载换栈后，让既有读取点继续指向 in-force 实例（与冷启动同源）。
+            self.symbol_search_store = new_stack.symbol_store
+            self.llm_reranker = new_stack.pipeline.llm_reranker
+            self.query_rewriter = new_stack.pipeline.query_rewriter
+            self.intent_classifier = new_stack.pipeline.intent_classifier
+            self._retrieval_stack = new_stack
+
+        self.reconfigurator = RetrievalReconfigurator(
+            settings=settings,
+            deps=retrieval_deps,
+            query_bus=query_bus,
+            credential_runtime=credential_runtime,
+            on_swap=_on_swap,
+        )
+        command_bus.register(
+            ReconfigureRetrievalCommand,
+            ReconfigureRetrievalCommandHandler(self.reconfigurator),
+        )
+        query_bus.register(
+            RetrievalConfigQuery,
+            RetrievalConfigQueryHandler(self.reconfigurator),
         )
 
         self.command_bus = command_bus

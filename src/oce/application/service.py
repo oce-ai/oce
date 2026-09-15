@@ -19,6 +19,12 @@ from oce.application.commands.ingest import (
 )
 from oce.application.commands.gc import GcCommand, GcResult
 from oce.application.commands.queue_admin import ResetQueueCommand, ResetQueueResult
+from oce.application.commands.reconfigure import (
+    ReconfigureResult,
+    ReconfigureRetrievalCommand,
+    RetrievalConfigQuery,
+    RetrievalConfigResult,
+)
 from oce.application.commands.requeue import RequeueStaleCommand, RequeueStaleResult
 from oce.application.credential_admin import (
     CreateCredentialCommand,
@@ -112,6 +118,32 @@ class RetrievalApplication:
         self,
     ) -> ReloadEmbeddingCredentialsResult:
         return await self._commands.execute(ReloadEmbeddingCredentialsCommand())
+
+    async def reconfigure_retrieval(
+        self,
+        *,
+        retrieval_patch: dict | None = None,
+        flags: dict | None = None,
+        milvus_patch: dict | None = None,
+        rerank_patch: dict | None = None,
+    ) -> ReconfigureResult:
+        """热改一组 L0 检索参数：重建 pipeline 并原子重注册，不重启不重建索引。
+
+        各 patch 的 key 受白名单约束，值经 pydantic 强转 + 校验；非法则抛 HotConfigError
+        （API 层转 422），且服务保持旧配置。
+        """
+        return await self._commands.execute(
+            ReconfigureRetrievalCommand(
+                retrieval_patch=retrieval_patch or {},
+                flags=flags or {},
+                milvus_patch=milvus_patch or {},
+                rerank_patch=rerank_patch or {},
+            )
+        )
+
+    async def retrieval_config(self) -> RetrievalConfigResult:
+        """读取当前生效的检索配置 + generation（read-after-write 校验用）。"""
+        return await self._queries.ask(RetrievalConfigQuery())
 
     async def batch_upload(
         self,

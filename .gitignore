@@ -26,6 +26,9 @@ htmlcov/
 .env.*
 !.env.example
 
+# oce bench: local secret env (feeds both profile loader and docker-compose ${VAR:?})
+bench/profiles/secrets.env
+
 *local_demo
 
 data

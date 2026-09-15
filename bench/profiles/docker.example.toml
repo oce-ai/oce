@@ -1,0 +1,86 @@
+# 容器化评测 profile 模板 —— Postgres + Milvus server + Redis，密钥全部走 env 引用。
+#
+# 用法：
+#   cp bench/profiles/docker.example.toml bench/profiles/docker.toml   # 按需改 host/port/维度
+#   cat > bench/profiles/secrets.env <<'EOF'                            # 此文件已 .gitignore
+#   OCE_BENCH_DB_PASSWORD=...
+#   OCE_BENCH_REDIS_PASSWORD=...
+#   OCE_BENCH_API_KEY=...
+#   OCE_BENCH_EMBED_API_KEY=...
+#   EOF
+#   oce bench serve --profile docker --tag sweep --port 8987
+#
+# 同一份 secrets.env 也喂 docker-compose（${OCE_BENCH_DB_PASSWORD:?} 占位，见 Commit 8）。
+#
+# **本文件不含任何明文密钥**：所有敏感字段都以 `<name>_env = "VAR_NAME"` 形式引用，
+# loader 解析时从 os.environ（真实 env > secrets.env）取值，缺失即报错。密钥字段写成
+# 字面量会被 load_profile 直接拒绝——"明文进 git"在解析期就被挡死。
+
+[backend]
+db_dialect = "postgresql+asyncpg"
+db_host = "localhost"
+db_port = 25432
+db_user = "oce"
+db_password_env = "OCE_BENCH_DB_PASSWORD"        # secret：env 引用，禁字面量
+
+milvus_mode = "server"
+milvus_endpoint = "http://localhost:19530"
+# Zilliz Cloud 才需要 token；自建 Milvus 留空即可（不写 milvus_token_env 这行）。
+# milvus_token_env = "OCE_BENCH_MILVUS_TOKEN"
+
+redis_host = "localhost"
+redis_port = 26379
+redis_password_env = "OCE_BENCH_REDIS_PASSWORD"  # secret：env 引用
+
+[isolation]
+db_name = "oce_bench"          # postgres 库名（reset 硬校验必须含 'oce_bench'）
+redis_db = 15                  # 独立逻辑库，杜绝串到生产消息
+collection_prefix = "bench"    # -> bench_{tag}_chunks / bench_{tag}_paths
+queue_template = "oce:bench_{tag}"
+
+[service]
+host = "127.0.0.1"
+port = 8987
+worker_enabled = true          # 异步嵌入（Postgres + Redis + worker），大仓更快
+worker_concurrency = 16
+api_key_env = "OCE_BENCH_API_KEY"        # secret：harness 发请求时用的 API key
+monitoring_enabled = true
+monitoring_store_query_text = false
+
+[embedding]
+enabled = true
+model = "f2llm-v2-0.6b"                  # L2：换模型/维度要完整 reset + 重嵌入
+endpoint = "http://127.0.0.1:8994/v1/embeddings"
+dimensions = 1024                        # 必须与下方 MILVUS_DENSE_DIM 一致（由 build_env 保证）
+api_key_env = "OCE_BENCH_EMBED_API_KEY"  # secret：被测嵌入服务 key
+max_concurrency = 8                      # 16 并发会打爆 MaaS TPM（429），压到 8 更稳
+max_batch_size = 20                      # 阿里云 MaaS qwen3-embedding 单请求上限 20
+timeout_seconds = 900.0                  # 慢速 GGUF/CPU 服务单请求可达分钟级
+# proxy = "http://127.0.0.1:8888"        # 公网 MaaS 需走本地代理时取消注释
+
+[rerank]
+enabled = false                          # 开重排时设 true 并填下列项
+# endpoint = "http://127.0.0.1:8994/v1/rerank"
+# model = "jina-reranker-v3.5"
+# api_key_env = "OCE_BENCH_RERANK_API_KEY"
+# top_n = 10
+# min_score = 0.05
+timeout_seconds = 300.0
+
+[llm]
+rerank_enabled = false                   # 开 LLM 语义重排时设 true 并填下列项
+# model = "Qwen/Qwen2.5-7B-Instruct"
+# base_url = "https://api.siliconflow.cn/v1"
+# api_key_env = "OCE_BENCH_LLM_API_KEY"
+
+# L0 检索默认值（运行期可热改）。与 serve_bench 的"确定性 pipeline"一致。
+[pipeline]
+default_top_k = 30
+final_select_k = 10
+rrf_k = 60
+path_index_enabled = true
+query_rewrite_enabled = false
+query_decomposition_enabled = false
+intent_classification_enabled = false
+rerank_enabled = false
+llm_rerank_enabled = false

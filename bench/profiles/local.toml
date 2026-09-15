@@ -1,0 +1,59 @@
+# 本地评测 profile —— 零外部依赖、零密钥，一条命令可跑。
+#
+#   oce bench serve --profile local --tag dev --port 8987
+#   oce bench run   --base-url http://127.0.0.1:8987 --repo <path>
+#
+# 存储：SQLite（元数据）+ Milvus Lite（向量，本地文件），都落在 <data-dir> 下。
+# worker 关闭 -> batch_upload 同步嵌入（service.batch_upload 见 background_indexing
+# 为假时内联 EmbedPendingCommand），因此无需 Redis / Postgres / 后台 worker。
+#
+# 本文件不含任何密钥字段：EMBED_API_KEY 等留空即回落到 oce 自带默认值或
+# <data-dir>/.env（`oce init` 生成）。要连真实嵌入服务时在此填 [embedding].endpoint /
+# model / dimensions，密钥仍走 <data-dir>/.env 或环境变量，勿写进本文件。
+
+[backend]
+db_dialect = "sqlite+aiosqlite"
+db_path = "{data_dir}/oce_bench.db"
+milvus_mode = "lite"
+milvus_path = "{data_dir}/oce_bench_milvus.db"
+
+[isolation]
+redis_db = 0
+collection_prefix = "bench_local"
+queue_template = "oce:bench_local_{tag}"
+
+[service]
+host = "127.0.0.1"
+port = 8987
+worker_enabled = false          # 同步嵌入，无需 Redis
+worker_concurrency = 4
+monitoring_enabled = true
+monitoring_store_query_text = false
+
+[embedding]
+enabled = true
+model = "f2llm-v2-0.6b"
+endpoint = "http://127.0.0.1:8994/v1/embeddings"
+dimensions = 1024
+max_concurrency = 4
+max_batch_size = 32
+timeout_seconds = 900.0
+
+[rerank]
+enabled = false                 # 本地默认关重排（无 rerank 服务）
+
+[llm]
+rerank_enabled = false          # 本地默认关 LLM 语义重排
+
+# L0 检索默认值（运行期可用 `oce bench reconfigure` 或 sweep 热改）。
+# 与 serve_bench 的"确定性 pipeline"一致：dense + exact + path + RRF，LLM 层关。
+[pipeline]
+default_top_k = 30
+final_select_k = 10
+rrf_k = 60
+path_index_enabled = true
+query_rewrite_enabled = false
+query_decomposition_enabled = false
+intent_classification_enabled = false
+rerank_enabled = false
+llm_rerank_enabled = false

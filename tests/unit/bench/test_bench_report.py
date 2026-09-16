@@ -279,6 +279,11 @@ class TestRenderRecord:
         # created_at 是 ISO-8601；头部 Date 行据此（非空 -> 显示）
         assert "- Date: 2026-09-15T12:00:00+00:00" in md
 
+    def test_rss_is_labeled_as_bench_client_metric(self):
+        md = render_record(_record())
+        assert "Peak bench client RSS" in md
+        assert "Peak process RSS" not in md
+
     def test_repo_commit_and_dirty(self):
         clean = render_record(_record(repo_commit="abc123", repo_dirty=False))
         assert "Repository SHA: `abc123`" in clean

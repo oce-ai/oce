@@ -202,12 +202,10 @@ def make_run_id(
     """自描述、可按时间排序的 run_id。
 
     ``{UTC 时间戳}__{repo}__{pipeline}__{model}__d{dim}__g{generation}__{tag}`` —— 时间戳
-    保证排序，``generation`` 保证**同一次 sweep 内多组参数不撞名**（秒级时间戳 + 仓库 +
-    pipeline + 模型 + 维度 + tag 在一次扫描里全恒定，缺了 generation 两组就会同名静默覆盖；
-    每次 reconfigure 都让 generation 前进，故各组天然可区分）。其余段让人一眼看出这条 run
-    测了什么（对齐旧文件名约定，但结构化字段才是真源）。
+    保证排序，微秒精度降低跨进程碰撞概率，``generation`` 保证同一次 sweep 内多组参数不
+    撞名。其余段让人一眼看出这条 run 测了什么；落盘时还会用排他创建拒绝任何碰撞。
     """
-    stamp = created_at.strftime("%Y%m%dT%H%M%SZ")
+    stamp = created_at.strftime("%Y%m%dT%H%M%S%fZ")
     # model 可能含 / : 等不适合文件名的字符，压平成 -
     safe_model = embed_model.replace("/", "-").replace(":", "-")
     return (
@@ -289,10 +287,9 @@ def save_record(record: RunRecord, runs_dir: Path) -> Path:
     """
     runs_dir.mkdir(parents=True, exist_ok=True)
     path = runs_dir / f"{record.run_id}.json"
-    path.write_text(
-        json.dumps(record.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # 排他创建是最后一道保护：即使调用方显式复用了 created_at，也不能静默覆盖历史结果。
+    with path.open("x", encoding="utf-8") as handle:
+        json.dump(record.to_dict(), handle, ensure_ascii=False, indent=2)
     return path
 
 

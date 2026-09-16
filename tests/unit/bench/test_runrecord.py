@@ -124,7 +124,18 @@ def test_run_id_includes_generation_for_uniqueness():
     # 同一秒、同一 repo/pipeline/model/dim/tag，仅 generation 不同 -> run_id 必须不同
     assert a != b
     assert "__g1__" in a and "__g2__" in b
-    assert a.startswith("20260915T120000Z__flask__base__m__d1024")
+    assert a.startswith("20260915T120000000000Z__flask__base__m__d1024")
+
+
+def test_run_id_uses_microseconds_to_avoid_cross_process_collision():
+    later = _FIXED.replace(microsecond=1)
+    common = dict(
+        repo_name="flask", pipeline="base", embed_model="m",
+        dimensions=1024, tag="run", generation=0,
+    )
+    assert make_run_id(created_at=_FIXED, **common) != make_run_id(
+        created_at=later, **common
+    )
 
 
 def test_run_id_sanitizes_model_path_chars():
@@ -234,6 +245,18 @@ def test_save_and_load_record_round_trip(tmp_path: Path):
     listed = list_records(tmp_path)
     assert len(listed) == 1
     assert listed[0].run_id == record.run_id
+
+
+def test_save_record_refuses_to_overwrite_existing_run(tmp_path: Path):
+    record = build_run_record(
+        run=_run([_row("q1")]), params=_snapshot(), repo_name="r",
+        repo_root=Path("/r"), repo_commit=None, repo_dirty=False,
+        queries_path=Path("q.jsonl"), profile="p", tag="t",
+        base_url="http://x", created_at=_FIXED,
+    )
+    save_record(record, tmp_path)
+    with pytest.raises(FileExistsError):
+        save_record(record, tmp_path)
 
 
 def test_list_records_sorted_by_run_id(tmp_path: Path):

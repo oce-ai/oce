@@ -199,7 +199,7 @@ def _render(view: _ReportView) -> str:
             f"- Index: {'reused' if view.index_reused else 'fresh upload'}; "
             f"source blobs considered: {view.uploaded}",
             f"- Upload failures: {len(view.skipped_reasons)}",
-            f"- Peak process RSS: {view.peak_rss_mb:.1f} MB",
+            f"- Peak bench client RSS: {view.peak_rss_mb:.1f} MB",
             f"- Wall time: {view.wall_seconds:.1f} s",
             f"- Query latency (client): p50 {view.latency_p50_ms:.0f} ms / "
             f"p95 {view.latency_p95_ms:.0f} ms",

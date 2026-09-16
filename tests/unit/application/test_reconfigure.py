@@ -7,6 +7,8 @@ path_index 运行时开启守卫。这是热调参的核心，逐条对应 recon
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from oce.application.bus import CommandBus, QueryBus
@@ -42,6 +44,18 @@ class _FakeReranker:
         self.reload_calls += 1
         if self._reload_raises:
             raise RuntimeError("db down")
+
+
+class _BlockingReranker(_FakeReranker):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def reload(self) -> None:
+        self.reload_calls += 1
+        self.started.set()
+        await self.release.wait()
 
 
 class _FakeCredentialRuntime:
@@ -326,6 +340,29 @@ class TestSuccessfulApply:
             )
             g.append(r.generation)
         assert g == [1, 2, 3]
+
+    async def test_concurrent_applies_are_serialized_without_lost_updates(self):
+        reranker = _BlockingReranker()
+        rec, _, settings, _, _, _ = _harness(reranker=reranker)
+
+        first = asyncio.create_task(
+            rec.apply(ReconfigureRetrievalCommand(rerank_patch={"top_n": 5}))
+        )
+        await reranker.started.wait()
+        second = asyncio.create_task(
+            rec.apply(
+                ReconfigureRetrievalCommand(retrieval_patch={"default_top_k": 17})
+            )
+        )
+        await asyncio.sleep(0)
+        assert not second.done()
+
+        reranker.release.set()
+        first_result, second_result = await asyncio.gather(first, second)
+
+        assert [first_result.generation, second_result.generation] == [1, 2]
+        assert settings.rerank.top_n == 5
+        assert settings.retrieval.default_top_k == 17
 
     async def test_effective_snapshot_superset_of_patch(self):
         """read-after-write：effective 必须包含刚下发的 patch 值（harness 据此确认生效）。"""

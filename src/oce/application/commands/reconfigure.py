@@ -20,9 +20,10 @@
    改 ``max_chunks_per_path`` / ``query_decomposition_enabled`` 等必须重建 pipeline，
    原地改属性对它们无效。
 
-并发安全（无需加锁）：``QueryBus.ask`` 第一行 ``handler = self._handlers.get(type)``
-在 asyncio 单线程下是原子取引用。换之前进入的请求持旧 handler → 旧 pipeline → 旧
-settings 的**完整一致对象**跑完；之后进入的拿新 handler。永无撕裂态，旧 pipeline 被 GC。
+并发安全分两层：``QueryBus.ask`` 的 handler 取引用与最终 swap 本身无需锁；换之前进入的
+请求持旧 handler → 旧 pipeline → 旧 settings 的完整一致对象跑完，之后进入的拿新 handler。
+但完整 reconfigure transaction 含 ``await reranker.reload()``，多个配置请求必须由 apply lock
+串行化，否则会基于同一旧快照交错提交并丢更新。
 **关键**：``live.retrieval`` 只能整体重绑（``live.retrieval = new``），绝不能就地
 ``setattr`` —— 旧 pipeline 按引用持有同一个 retrieval 对象，就地改会让 in-flight 请求
 看到新值，破坏隔离。
@@ -44,6 +45,7 @@ mutation 之前，失败则 revert live.rerank 并抛出，后续零 mutation；
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -233,6 +235,7 @@ class RetrievalReconfigurator:
         self._credential_runtime = credential_runtime
         self._on_swap = on_swap
         self._generation = 0
+        self._apply_lock = asyncio.Lock()
 
     @property
     def generation(self) -> int:
@@ -245,6 +248,13 @@ class RetrievalReconfigurator:
         )
 
     async def apply(self, command: ReconfigureRetrievalCommand) -> ReconfigureResult:
+        """串行执行完整事务，避免两个带 await 的重配置基于同一旧快照互相覆盖。"""
+        async with self._apply_lock:
+            return await self._apply_locked(command)
+
+    async def _apply_locked(
+        self, command: ReconfigureRetrievalCommand
+    ) -> ReconfigureResult:
         live = self._settings
 
         # ---- 校验相位（纯函数，零 mutation；任何失败都不改任何状态）----

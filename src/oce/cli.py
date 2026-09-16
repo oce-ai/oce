@@ -150,6 +150,12 @@ def build_parser() -> argparse.ArgumentParser:
     version = subparsers.add_parser("version", help="Print the oce version")
     version.set_defaults(handler=_version)
 
+    # bench 子命令树。惰性挂载：oce.bench.profiles 反向 import 本模块的 _load_personal_env，
+    # 顶层 import 会成环；放在 build_parser 内 import 可破环（调用时本模块已完整加载）。
+    from oce.bench.cli import build_bench_parser
+
+    build_bench_parser(subparsers)
+
     return parser
 
 

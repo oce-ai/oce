@@ -40,6 +40,20 @@ from oce.cli import _load_personal_env
 
 SECRETS_ENV_FILENAME = "secrets.env"
 
+# profile / 矩阵 TOML 的默认目录：仓库根 bench/profiles（用户可编辑，**不进 wheel**，
+# 故相对 cwd 解析——文档化的用法是从 oce 仓库根运行 oce bench）。
+_DEFAULT_PROFILES_DIR = Path("bench") / "profiles"
+
+
+def default_profiles_dir() -> Path:
+    """``--profile <短名>`` 的查找目录（仓库根 ``bench/profiles``，相对 cwd）。
+
+    profile 是用户可编辑的环境相关配置，按设计不打包进 wheel；因此短名解析锚定在
+    运行目录下的 ``bench/profiles``。绝对路径形式的 ``--profile`` 不受此影响。
+    """
+    return _DEFAULT_PROFILES_DIR
+
+
 # 密钥字段：profile 中只能用 ``<name>_env`` 引用，出现字面量即拒绝。
 # 这些名字对应 build_env 里会写进 os.environ 的敏感值来源。
 SECRET_FIELDS: frozenset[str] = frozenset({

@@ -140,6 +140,11 @@ class BenchClient:
             transport=transport,
         )
 
+    @property
+    def base_url(self) -> str:
+        """被测服务基址（供 sweep/cli 记进 RunRecord 溯源，不重复传参）。"""
+        return self._base_url
+
     async def __aenter__(self) -> "BenchClient":
         return self
 

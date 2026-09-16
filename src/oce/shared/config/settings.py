@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -181,6 +181,46 @@ class LLMSettings(BaseSettings):
     tpm_limit: int = Field(
         default=60_000, ge=1_000, description="LLM 接口 TPM 上限，0 以上时客户端排队"
     )
+
+
+class ChunkingSettings(BaseSettings):
+    """切块配置（L1：建库期参数，改它要 drop collection + reindex，不可热改）
+
+    两条切块路径各有自己的尺寸旋钮，二者口径不同：
+    - ``recursive_*`` 驱动 RecursiveChunker（统一 fallback，按字符窗口递归分隔）
+    - ``ast_*``       驱动 CastChunker（AST 语义切块，max 是目标窗口而非硬上限）
+    默认值与提配置前 chunker.py 里的硬编码逐字一致，故装配本组不改变任何切块行为。
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="CHUNK_",
+        env_file=[".env", ".env.local"],
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    recursive_size: int = Field(
+        default=6_000, ge=1, description="RecursiveChunker 目标块大小（字符）"
+    )
+    recursive_overlap: int = Field(
+        default=200, ge=0, description="RecursiveChunker 分隔重叠（只影响切点，不产生块间重复）"
+    )
+    ast_max_size: int = Field(
+        default=1_500, ge=1, description="CastChunker 语义块目标窗口（字符）"
+    )
+    ast_overlap: int = Field(
+        default=0, ge=0, description="CastChunker 块间重叠字符数"
+    )
+
+    @model_validator(mode="after")
+    def _check_overlap_within_size(self) -> ChunkingSettings:
+        """RecursiveChunker 要求 overlap ∈ [0, size)；在配置期早失败，别等到装配抛错。"""
+        if self.recursive_overlap >= self.recursive_size:
+            raise ValueError(
+                "CHUNK_RECURSIVE_OVERLAP must be < CHUNK_RECURSIVE_SIZE "
+                f"(got overlap={self.recursive_overlap}, size={self.recursive_size})"
+            )
+        return self
 
 
 class RetrievalSettings(BaseSettings):
@@ -382,6 +422,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     worker: WorkerSettings = Field(default_factory=WorkerSettings)

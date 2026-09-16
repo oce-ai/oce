@@ -237,7 +237,7 @@ class Container:
             self.embedder, self.reranker, list(stack.llm_clients)
         )
 
-        self.chunker = build_chunker()
+        self.chunker = build_chunker(settings.chunking)
         self._uow_factory = lambda: SqlAlchemyUnitOfWork(async_session_factory)
 
         # 资源采样器：监控开启且 psutil 可用时后台周期采样，否则禁用

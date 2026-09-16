@@ -210,7 +210,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
                 f"pinned={commit[:10]} {ds.repository.describe})"
             )
     else:
-        print("  (none found; datasets land in src/oce/bench/datasets/ — see Commit 8)")
+        print("  (none found; expected *.jsonl in src/oce/bench/datasets/)")
 
     print("\nProfiles:")
     profiles_dir = default_profiles_dir()

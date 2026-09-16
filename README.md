@@ -51,7 +51,7 @@ machines need to share one index.
 - **ACE-compatible API** — a drop-in `/agents/*` surface for ACE clients, secured with bearer auth.
 - **Clean DDD/CQRS architecture** — dependencies point inward; infrastructure is wired only by the composition root, keeping business logic testable.
 - **Operational admin API + monitoring** — an admin-key-scoped surface manages model credentials, the embedding queue, and garbage collection, while a bypass metrics pipeline records call/token/resource stats and per-stage retrieval audits.
-- **[Reproducible evaluation harness](https://github.com/oce-ai/oce-benchmark)** — an HTTP-only benchmark suite scores retrieval quality with Top-1 + nDCG@10 against real repositories.
+- **Reproducible evaluation harness** — a built-in `oce bench` command chain scores retrieval quality with Top-1 + nDCG@10 against real repositories; one indexing pass sweeps N hot-swapped L0 parameter sets and records each run as structured JSON + markdown. See [Evaluation harness](#evaluation-harness).
 
 <details>
 <summary><strong>Table of contents</strong></summary>
@@ -64,6 +64,7 @@ machines need to share one index.
 - [API](#api)
 - [Architecture](#architecture)
   - [Retrieval pipeline](#retrieval-pipeline)
+- [Evaluation harness](#evaluation-harness)
 - [Tests](#tests)
 - [License](#license)
 
@@ -407,6 +408,53 @@ flowchart TB
     PathBoost --> Select
     Select --> Out["final hits (fused score desc)"]
 ```
+
+## Evaluation harness
+
+`oce bench` scores retrieval quality against real repositories (Top-1 + nDCG@10, 2 points per
+query) over HTTP. It collapses what used to be a separate cross-project benchmark repo into one
+command chain.
+
+The core idea is **layered hot-tuning + index reuse**: "changing a parameter" is split by cost
+into three tiers, so the most expensive action happens only once.
+
+| Tier | Parameters | Cost | Action |
+|---|---|---|---|
+| **L0** | query-time (top_k / rrf_k / path_boost / component toggles / rerank thresholds…) | **seconds**, no restart, no reindex | `reconfigure` / `sweep` via the admin hot-config endpoint |
+| **L1** | chunking / vector-index (chunk_size / HNSW M, efConstruction) | minutes, re-embed but no restart | drop collection + reindex |
+| **L2** | embedding model / dimensions / storage backend | most expensive, full reset + restart + re-embed | swap profile and restart |
+
+`sweep` indexes once, then for each parameter set hot-swaps L0 config, runs the queries, and
+records a `RunRecord`. Hot-swap is **rebuild + atomic re-registration** (never in-place attribute
+mutation), with read-after-write verification that `generation` advanced and `effective ⊇ patch`
+before the set is scored.
+
+```bash
+# Zero-dependency local profile (SQLite + Milvus Lite, synchronous embedding):
+uv run oce bench serve --profile local --tag dev --port 8987    # terminal 1 (long-running)
+uv run oce bench run   --base-url http://127.0.0.1:8987 --repo flask   # terminal 2
+
+# Index once, sweep N L0 parameter sets (seconds per switch, no re-embedding):
+uv run oce bench sweep   --base-url http://127.0.0.1:8987 --repo flask \
+    --matrix bench/profiles/sweep_topk.example.toml --reuse-index
+uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
+```
+
+Each run writes `<run_id>.json` (the single source of truth for `compare`) plus `<run_id>.md`
+(human view) into `bench/runs/`; both render from the same `RunRecord`, so they never drift.
+`compare` auto-annotates which parameter each column changed (no filename conventions). Long-lived
+baselines are promoted into the tracked `bench/runs/golden/` via `compare --promote <run_id>`.
+
+**Safety gate:** the hot-config endpoint only accepts changes when the service was started with
+`OCE_BENCH_HOT_CONFIG=allow` (injected by `oce bench serve`); otherwise it returns 409. A normal
+`oce serve` deployment can therefore never have its retrieval behavior hot-changed. `oce bench
+reset` additionally refuses any DB URL not containing `oce_bench` and never drops the protected
+production collections.
+
+Datasets ship inside the package (`src/oce/bench/datasets/`). Profiles live at
+`bench/profiles/*.toml`; secrets are referenced via `<field>_env = "VAR_NAME"` and resolved from
+the environment or the gitignored `bench/profiles/secrets.env` — never written as literals. Full
+guide: [`docs/evaluation-guide.md`](docs/evaluation-guide.md).
 
 ## Tests
 

@@ -79,6 +79,9 @@ include = ["oce*"]
 [tool.setuptools.package-data]
 # alembic 模板只在 wheel 中存在时，个人模式 oce serve 才能离线跑迁移
 "oce.alembic" = ["script.py.mako"]
+# 评测数据集随包发布：uv tool install 后 oce bench run 即可用，无需 checkout oce 仓库。
+# datasets/ 是纯数据目录（无 __init__.py），故 glob 挂在父包 oce.bench 下。
+"oce.bench" = ["datasets/*.jsonl", "datasets/*.metadata.json"]
 
 # ==================== Pytest 配置 ====================
 [tool.pytest.ini_options]

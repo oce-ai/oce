@@ -1,0 +1,40 @@
+# 示例扫描矩阵：一次索引，扫多组 L0 检索参数（查询期热改，秒级切换，不重嵌入）。
+#
+#   oce bench sweep --base-url http://127.0.0.1:8987 --repo flask \
+#       --matrix bench/profiles/sweep_topk.example.toml
+#
+# 格式：每个 [[set]] 是一组参数；子表名必须是 retrieval / flags / milvus / rerank 之一，
+# 且其中的 key 必须**可 L0 热改**（见 src/oce/application/commands/reconfigure.py 的
+# HOT_* 白名单）。放错组或拼错 key 都会在加载期报错——绝不让 sweep 拿"以为改了"的旧
+# 配置跑出一组假数据。name 缺省时从内容派生（如 set2[default_top_k=50]）。
+#
+# chunk_size / HNSW M / efConstruction / 嵌入模型维度 属 L1/L2，**不可热改**（要 reindex
+# 或完整 reset），放进矩阵会被拒。一次扫描只动一层，否则分差无法归因。
+
+# 基线：用服务当前配置跑一组（空 set 不下发热改）
+[[set]]
+name = "baseline"
+
+# top_k 曲线：召回窗口从 30 扫到 80，看涨分与涨延迟的权衡
+[[set]]
+name = "topk-30"
+[set.retrieval]
+default_top_k = 30
+
+[[set]]
+name = "topk-50"
+[set.retrieval]
+default_top_k = 50
+
+[[set]]
+name = "topk-80"
+[set.retrieval]
+default_top_k = 80
+
+# 叠加 RRF 融合常数与向量阈值（同一组内多 key 一起热改）
+[[set]]
+name = "topk-50-rrf70"
+[set.retrieval]
+default_top_k = 50
+rrf_k = 70
+vector_threshold = 0.2

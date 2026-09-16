@@ -5,7 +5,10 @@ services:
     environment:
       POSTGRES_DB: oce
       POSTGRES_USER: oce
-      POSTGRES_PASSWORD: 5T5f32Nd2uK0tmtUPd7R
+      # 密码经环境注入，勿在此写明文。同一份 bench/profiles/secrets.env（gitignore）
+      # 也供 oce bench profile 用。注意：这两个密码在 git early history 里曾硬编码泄漏，
+      # 历史无法擦除，生产/共享环境必须轮换（详见 docs/evaluation-guide.md）。
+      POSTGRES_PASSWORD: ${OCE_BENCH_DB_PASSWORD:?set OCE_BENCH_DB_PASSWORD (e.g. in bench/profiles/secrets.env)}
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
     healthcheck:
@@ -22,11 +25,12 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis-dev
-    command: redis-server --appendonly yes --requirepass Wo5DNKyDKoqviWnxXcDh
+    command: redis-server --appendonly yes --requirepass ${OCE_BENCH_REDIS_PASSWORD:?set OCE_BENCH_REDIS_PASSWORD (e.g. in bench/profiles/secrets.env)}
     volumes:
       - redis_data_dev:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "-a", "Wo5DNKyDKoqviWnxXcDh", "ping" ]
+      # compose 在解析期用 host env / secrets.env 插值（与上方 command 同源）
+      test: [ "CMD-SHELL", "redis-cli -a '${OCE_BENCH_REDIS_PASSWORD}' ping" ]
       interval: 10s
       timeout: 3s
       retries: 5

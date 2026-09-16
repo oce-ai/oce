@@ -45,6 +45,20 @@ uv run pytest tests/unit/infrastructure/test_milvus3.py -q
 按文件粒度跑，让 Milvus Lite / tree-sitter 运行时在进程间释放；内存受限时勿在单进程里跑整个
 `tests/unit/infrastructure`。
 
+评测（`oce bench`，详见 `docs/evaluation-guide.md`）：
+
+```powershell
+uv run oce bench list                                              # 列出数据集与 profile
+uv run oce bench serve --profile local --tag dev --port 8987       # 零依赖隔离服务（阻塞）
+uv run oce bench run   --base-url http://127.0.0.1:8987 --repo flask
+uv run oce bench sweep --base-url http://127.0.0.1:8987 --repo flask --matrix bench/profiles/sweep_topk.example.toml
+uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
+```
+
+改检索参数按代价分三层：L0 查询期参数可热改（秒级，`reconfigure`/`sweep`）；L1 切块/向量索引
+参数要 reindex；L2 嵌入模型/维度/后端要完整 reset + 重启。可热改清单见
+`application/commands/reconfigure.py` 的 `HOT_*` 白名单。
+
 ## 代码约束
 
 - 依赖管理只使用 `uv`；新增依赖先修改 `pyproject.toml`。
@@ -58,6 +72,12 @@ uv run pytest tests/unit/infrastructure/test_milvus3.py -q
 - 不保留未接入 production composition root 的占位实现或阶段性迁移注释。
 - 单文件职责单一；注释解释约束和原因，不复述代码。
 - 保持 ACE API 字段与错误语义兼容。
+- 评测（`oce.bench`）专属约束：
+  - profile TOML（`bench/profiles/*.toml`）密钥字段只允许 `<field>_env = "VAR_NAME"` 引用，写成字面量由 `load_profile` 拒绝；密钥取值优先级 真实 env > `bench/profiles/secrets.env`（gitignore）> `model_credentials` 表。
+  - L0 热改端点仅在启动设 `OCE_BENCH_HOT_CONFIG=allow`（由 `oce bench serve` 注入）时放行，否则 409；正常 `oce serve` 永不可被热改检索行为。热改用「重建 + 原子重注册」，禁原地 `setattr`（绕过 pydantic 校验、留撕裂态）。
+  - `oce bench reset` 硬闸：拒绝 DB URL 不含 `oce_bench` 的目标，且永不 drop PROTECTED collection（见 `bench/service.py`）。
+  - 数据集随包发布在 `src/oce/bench/datasets/`（pyproject package-data）；sweep 产物落 `bench/runs/`（gitignore），仅 curated `bench/runs/golden/` 入版本控制。
+  - md 报告由 `report.py` 的单一渲染体从 RunRecord 渲染，与 JSON 同源——勿另起一套渲染逻辑使二者漂移。
 
 ## 运行环境
 

@@ -277,3 +277,62 @@ def test_resolve_explicit_wins_over_env(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OCE_BENCH_REPO_FLASK", str(env_clone))
     resolved = resolve_repo_root(_ds("flask"), explicit=str(explicit))
     assert resolved == explicit.resolve()
+
+
+# ---------------------------------------------------------------------------
+# 随包发布的真实数据集（Commit 8 迁入 src/oce/bench/datasets/ + package-data）
+# ---------------------------------------------------------------------------
+
+
+class TestShippedDatasets:
+    """守卫随包数据集：迁入正确、可发现、metadata 配对、jsonl 合法。
+
+    这组测的是**包里真实存在的文件**（非 tmp fixture），故能挡住"漏拷一份/metadata 配错/
+    package-data glob 写错导致 wheel 里没有数据"这类回归。被测仓库是外部大仓、不进包，故此处
+    只验数据集自身，不验 resolve_repo_root。
+    """
+
+    def test_two_datasets_shipped_and_discovered(self):
+        from oce.bench.datasets import default_datasets_dir
+
+        datasets = discover_datasets()  # 默认扫包内 datasets/
+        aliases = {d.alias for d in datasets}
+        assert "flask-retrieval-benchmark" in aliases
+        assert "cc-switch-retrieval-benchmark" in aliases
+        # 文件确实在包内目录（package-data 的来源）
+        for d in datasets:
+            assert d.queries_path.parent == default_datasets_dir()
+
+    def test_each_dataset_has_paired_metadata(self):
+        for d in discover_datasets():
+            assert d.metadata_path is not None, f"{d.alias} 缺 metadata"
+            assert d.metadata_path.is_file()
+            assert d.questions == 100  # 两份都是 100 题
+
+    def test_metadata_pins_repository_commit(self):
+        """metadata 钉住被测仓库 commit/describe（RunRecord 溯源依赖）。"""
+        flask = find_dataset("flask")
+        assert flask.name == "flask"
+        assert flask.repository.commit  # 非空
+        assert flask.repository.describe  # tag/describe 非空
+        assert "flask" in flask.repository.remote.lower()
+
+    def test_jsonl_rows_are_valid_queries(self):
+        """逐行校验 jsonl schema 完整（与 SKILL.md 第 7 节的自检口径一致）。"""
+        for d in discover_datasets():
+            with d.queries_path.open(encoding="utf-8-sig") as handle:
+                rows = [json.loads(line) for line in handle if line.strip()]
+            assert len(rows) == d.questions
+            ids = set()
+            for row in rows:
+                for key in ("category", "difficulty", "query", "expected_files"):
+                    assert key in row, f"{d.alias}: 缺字段 {key}"
+                qid = row.get("id") or row.get("query_id")
+                assert qid and qid not in ids, f"{d.alias}: id 缺失或重复 {qid}"
+                ids.add(qid)
+                assert row["difficulty"] in (1, 2, 3)
+                assert isinstance(row["expected_files"], list) and row["expected_files"]
+
+    def test_find_by_short_name_resolves_shipped(self):
+        assert find_dataset("flask").alias == "flask-retrieval-benchmark"
+        assert find_dataset("cc-switch").alias == "cc-switch-retrieval-benchmark"

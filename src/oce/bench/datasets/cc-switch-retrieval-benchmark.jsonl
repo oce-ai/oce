@@ -1,0 +1,100 @@
+{"id": "Q01", "category": "file_exact_match", "difficulty": 1, "query": "Cargo 依赖配置文件在哪里？", "expected_files": ["src-tauri/Cargo.toml"], "must_contain": ["Cargo"]}
+{"id": "Q02", "category": "file_exact_match", "difficulty": 1, "query": "Node.js 的 package.json 在哪里？", "expected_files": ["package.json"], "must_contain": ["package"]}
+{"id": "Q03", "category": "file_exact_match", "difficulty": 1, "query": "TypeScript 的配置文件在哪里？", "expected_files": ["tsconfig.json"], "must_contain": ["tsconfig"]}
+{"id": "Q04", "category": "configuration_lookup", "difficulty": 2, "query": "Tauri 的主窗口配置在哪里？", "expected_files": ["src-tauri/tauri.conf.json"], "must_contain": ["tauri"]}
+{"id": "Q05", "category": "configuration_lookup", "difficulty": 2, "query": "Vite 的构建配置文件是哪个？", "expected_files": ["vite.config.ts"], "must_contain": ["vite"]}
+{"id": "Q06", "category": "configuration_lookup", "difficulty": 2, "query": "Tailwind CSS 的配置在哪里？", "expected_files": ["tailwind.config.cjs"], "must_contain": ["tailwind"]}
+{"id": "Q07", "category": "configuration_lookup", "difficulty": 2, "query": "i18n 的中文翻译文件在哪里？", "expected_files": ["src/i18n/locales/zh.json"], "must_contain": ["zh"]}
+{"id": "Q08", "category": "semantic_feature", "difficulty": 2, "query": "MCP 服务器配置的管理逻辑在哪里？", "expected_files": ["src-tauri/src/services/mcp.rs", "src/lib/api/mcp.ts"], "must_contain": ["mcp"]}
+{"id": "Q09", "category": "semantic_feature", "difficulty": 3, "query": "Provider 的增删改查操作在哪里实现？", "expected_files": ["src-tauri/src/services/provider/mod.rs", "src/lib/api/providers.ts"], "must_contain": ["provider"]}
+{"id": "Q10", "category": "semantic_feature", "difficulty": 2, "query": "自动启动功能的实现代码在哪里？", "expected_files": ["src-tauri/src/auto_launch.rs"], "must_contain": ["auto_launch"]}
+{"id": "Q11", "category": "semantic_feature", "difficulty": 3, "query": "Session 使用统计的计算逻辑在哪里？", "expected_files": ["src-tauri/src/services/session_usage.rs"], "must_contain": ["session_usage"]}
+{"id": "Q12", "category": "semantic_feature", "difficulty": 2, "query": "技能（Skills）同步的实现在哪里？", "expected_files": ["src-tauri/src/services/skill.rs", "src/lib/api/skills.ts"], "must_contain": ["skill"]}
+{"id": "Q13", "category": "component_location", "difficulty": 2, "query": "Provider 图标选择器组件在哪里？", "expected_files": ["src/components/IconPicker.tsx"], "must_contain": ["IconPicker"]}
+{"id": "Q14", "category": "component_location", "difficulty": 2, "query": "MCP 配置向导弹窗组件在哪里？", "expected_files": ["src/components/mcp/McpWizardModal.tsx"], "must_contain": ["McpWizardModal"]}
+{"id": "Q15", "category": "component_location", "difficulty": 2, "query": "深色模式切换的 Hook 在哪里？", "expected_files": ["src/hooks/useDarkMode.ts"], "must_contain": ["useDarkMode"]}
+{"id": "Q16", "category": "component_location", "difficulty": 2, "query": "Button 这个 UI 组件在哪里定义？", "expected_files": ["src/components/ui/button.tsx"], "must_contain": ["button"]}
+{"id": "Q17", "category": "api_usage", "difficulty": 2, "query": "如何调用 Tauri 的文件对话框打开文件？", "expected_files": ["src/lib/api/config.ts", "src-tauri/src/commands/config.rs"], "must_contain": ["config"]}
+{"id": "Q18", "category": "api_usage", "difficulty": 3, "query": "前端如何监听 Tauri 的自定义事件？", "expected_files": ["src/hooks/useTauriEvent.ts"], "must_contain": ["useTauriEvent"]}
+{"id": "Q19", "category": "api_usage", "difficulty": 2, "query": "Proxy 代理配置的 API 调用在哪里？", "expected_files": ["src/lib/api/proxy.ts"], "must_contain": ["proxy"]}
+{"id": "Q20", "category": "api_usage", "difficulty": 2, "query": "如何调用后端的 Provider 切换命令？", "expected_files": ["src/lib/api/providers.ts", "src-tauri/src/commands/provider.rs"], "must_contain": ["provider"]}
+{"id": "Q21", "category": "error_handling", "difficulty": 3, "query": "前端如何处理 API 调用错误？", "expected_files": ["src/utils/errorUtils.ts", "src/lib/frontendLogger.ts"], "must_contain": ["error"]}
+{"id": "Q22", "category": "error_handling", "difficulty": 2, "query": "Rust 后端的统一错误类型定义在哪里？", "expected_files": ["src-tauri/src/error.rs"], "must_contain": ["error"]}
+{"id": "Q23", "category": "error_handling", "difficulty": 3, "query": "React 组件的错误边界在哪里定义？", "expected_files": ["src/components/FrontendErrorBoundary.tsx"], "must_contain": ["FrontendErrorBoundary"]}
+{"id": "Q24", "category": "architecture_understanding", "difficulty": 3, "query": "系统托盘的实现和事件处理在哪里？", "expected_files": ["src-tauri/src/tray.rs"], "must_contain": ["tray"]}
+{"id": "Q25", "category": "architecture_understanding", "difficulty": 3, "query": "应用初始化状态管理的实现在哪里？", "expected_files": ["src-tauri/src/init_status.rs"], "must_contain": ["init_status"]}
+{"id": "Q26", "category": "architecture_understanding", "difficulty": 3, "query": "WebDAV 自动同步的调度逻辑在哪里？", "expected_files": ["src-tauri/src/services/webdav_auto_sync.rs"], "must_contain": ["webdav_auto_sync"]}
+{"id": "Q27", "category": "cross_language", "difficulty": 3, "query": "前端如何调用后端的 MCP 命令？", "expected_files": ["src/lib/api/mcp.ts", "src-tauri/src/commands/mcp.rs"], "must_contain": ["mcp"]}
+{"id": "Q28", "category": "cross_language", "difficulty": 3, "query": "Provider 的前后端类型定义在哪里？", "expected_files": ["src/types.ts", "src-tauri/src/provider.rs"], "must_contain": ["provider"]}
+{"id": "Q29", "category": "cross_language", "difficulty": 3, "query": "前端如何接收后端推送的使用统计事件？", "expected_files": ["src/hooks/useUsageEventBridge.ts", "src-tauri/src/usage_events.rs"], "must_contain": ["usage"]}
+{"id": "Q30", "category": "semantic_feature", "difficulty": 2, "query": "Deeplink 导入配置的处理逻辑在哪里？", "expected_files": ["src-tauri/src/commands/deeplink.rs", "src/components/DeepLinkImportDialog.tsx"], "must_contain": ["deeplink"]}
+{"id": "Q31", "category": "symbol_location", "difficulty": 2, "query": "`add_provider` 函数在哪个 Rust 文件定义？", "expected_files": ["src-tauri/src/commands/provider.rs"], "must_contain": ["add_provider"]}
+{"id": "Q32", "category": "symbol_location", "difficulty": 2, "query": "`get_providers` 函数的实现位置？", "expected_files": ["src-tauri/src/commands/provider.rs"], "must_contain": ["get_providers"]}
+{"id": "Q33", "category": "symbol_location", "difficulty": 2, "query": "`invoke_handler` 在 lib.rs 中注册了哪些命令？", "expected_files": ["src-tauri/src/lib.rs"], "must_contain": ["invoke_handler"]}
+{"id": "Q34", "category": "symbol_location", "difficulty": 2, "query": "`tauri::command` 宏在哪些文件中使用？", "expected_files": ["src-tauri/src/lib.rs", "src-tauri/src/commands/*.rs"], "must_contain": ["tauri::command"]}
+{"id": "Q35", "category": "symbol_location", "difficulty": 2, "query": "`auth_start_login` 函数在哪里定义？", "expected_files": ["src-tauri/src/commands/auth.rs"], "must_contain": ["auth_start_login"]}
+{"id": "Q36", "category": "symbol_location", "difficulty": 2, "query": "`copilot_get_models` 的实现文件是？", "expected_files": ["src-tauri/src/commands/copilot.rs"], "must_contain": ["copilot_get_models"]}
+{"id": "Q37", "category": "symbol_location", "difficulty": 2, "query": "`check_for_updates` 命令的源码位置？", "expected_files": ["src-tauri/src/commands/misc.rs"], "must_contain": ["check_for_updates"]}
+{"id": "Q38", "category": "symbol_location", "difficulty": 2, "query": "`get_app_config_path` 函数在哪个文件？", "expected_files": ["src-tauri/src/commands/config.rs"], "must_contain": ["get_app_config_path"]}
+{"id": "Q39", "category": "symbol_location", "difficulty": 2, "query": "`delete_profile` 函数的实现位置？", "expected_files": ["src-tauri/src/commands/profile.rs"], "must_contain": ["delete_profile"]}
+{"id": "Q40", "category": "symbol_location", "difficulty": 2, "query": "`enable_prompt` 函数在哪里定义？", "expected_files": ["src-tauri/src/commands/prompt.rs"], "must_contain": ["enable_prompt"]}
+{"id": "Q41", "category": "call_chain", "difficulty": 3, "query": "前端如何调用后端的 `add_provider` 命令？", "expected_files": ["src/lib/api/providers.ts", "src-tauri/src/commands/provider.rs"], "must_contain": ["add_provider"]}
+{"id": "Q42", "category": "call_chain", "difficulty": 3, "query": "`auth_start_login` 的完整调用链：前端 → Tauri → Rust", "expected_files": ["src/lib/api/auth.ts", "src-tauri/src/lib.rs", "src-tauri/src/commands/auth.rs"], "must_contain": ["auth_start_login"]}
+{"id": "Q43", "category": "call_chain", "difficulty": 3, "query": "`copilot_get_models` 的调用路径是什么？", "expected_files": ["src/lib/api/copilot.ts", "src-tauri/src/lib.rs", "src-tauri/src/commands/copilot.rs"], "must_contain": ["copilot_get_models"]}
+{"id": "Q44", "category": "call_chain", "difficulty": 3, "query": "`check_for_updates` 是如何从 UI 触发的？", "expected_files": ["src/lib/api/settings.ts", "src-tauri/src/commands/misc.rs"], "must_contain": ["check_for_updates"]}
+{"id": "Q45", "category": "call_chain", "difficulty": 3, "query": "`get_app_config_path` 的前后端调用关系？", "expected_files": ["src/lib/api/settings.ts", "src-tauri/src/commands/config.rs"], "must_contain": ["get_app_config_path"]}
+{"id": "Q46", "category": "call_chain", "difficulty": 3, "query": "`delete_profile` 的完整执行路径？", "expected_files": ["src/components/profiles/ProfileManageDialog.tsx", "src/lib/api/profiles.ts", "src-tauri/src/commands/profile.rs"], "must_contain": ["delete_profile"]}
+{"id": "Q47", "category": "call_chain", "difficulty": 3, "query": "`enable_prompt` 的调用链？", "expected_files": ["src/components/prompts/PromptToggle.tsx", "src/lib/api/prompts.ts", "src-tauri/src/commands/prompt.rs"], "must_contain": ["enable_prompt"]}
+{"id": "Q48", "category": "call_chain", "difficulty": 3, "query": "`auth_poll_for_account` 如何被前端使用？", "expected_files": ["src/components/providers/forms/hooks/useManagedAuth.ts", "src/lib/api/auth.ts", "src-tauri/src/commands/auth.rs"], "must_contain": ["auth_poll_for_account"]}
+{"id": "Q49", "category": "call_chain", "difficulty": 3, "query": "`copilot_logout` 的完整流程？", "expected_files": ["src/lib/api/copilot.ts", "src-tauri/src/commands/copilot.rs"], "must_contain": ["copilot_logout"]}
+{"id": "Q50", "category": "call_chain", "difficulty": 3, "query": "`check_env_conflicts` 的调用链？", "expected_files": ["src/App.tsx", "src/lib/api/env.ts", "src-tauri/src/commands/env.rs"], "must_contain": ["check_env_conflicts"]}
+{"id": "Q51", "category": "file_exact_match", "difficulty": 1, "query": "锁定 Rust 编译器版本和组件的文件是哪个？", "expected_files": ["rust-toolchain.toml"], "must_contain": ["toolchain"]}
+{"id": "Q52", "category": "file_exact_match", "difficulty": 1, "query": "pnpm monorepo 的工作区定义文件在哪里？", "expected_files": ["pnpm-workspace.yaml"], "must_contain": ["workspace"]}
+{"id": "Q53", "category": "file_exact_match", "difficulty": 2, "query": "shadcn/ui 组件库的配置文件是哪个？", "expected_files": ["components.json"], "must_contain": ["shadcn"]}
+{"id": "Q54", "category": "file_exact_match", "difficulty": 1, "query": "声明项目所用 Node.js 版本的文件在哪里？", "expected_files": [".node-version"], "must_contain": ["node"]}
+{"id": "Q55", "category": "file_exact_match", "difficulty": 2, "query": "Flatpak 打包的应用清单文件在哪里？", "expected_files": ["flatpak/com.ccswitch.desktop.yml"], "must_contain": ["flatpak"]}
+{"id": "Q56", "category": "file_exact_match", "difficulty": 2, "query": "前端单元测试框架 vitest 的配置文件是哪个？", "expected_files": ["vitest.config.ts"], "must_contain": ["vitest"]}
+{"id": "Q57", "category": "file_exact_match", "difficulty": 1, "query": "记录版本发布变更历史的文件在哪里？", "expected_files": ["CHANGELOG.md"], "must_contain": ["changelog"]}
+{"id": "Q58", "category": "configuration_lookup", "difficulty": 1, "query": "PostCSS 的构建配置文件在哪里？", "expected_files": ["postcss.config.cjs"], "must_contain": ["postcss"]}
+{"id": "Q59", "category": "configuration_lookup", "difficulty": 3, "query": "Windows 平台专属的 Tauri 窗口配置覆盖文件是哪个？", "expected_files": ["src-tauri/tauri.windows.conf.json"], "must_contain": ["windows"]}
+{"id": "Q60", "category": "configuration_lookup", "difficulty": 1, "query": "英文界面语言包文件在哪里？", "expected_files": ["src/i18n/locales/en.json"], "must_contain": ["en"]}
+{"id": "Q61", "category": "configuration_lookup", "difficulty": 3, "query": "i18n 的初始化与语言切换配置在哪个文件？", "expected_files": ["src/i18n/index.ts"], "must_contain": ["i18n"]}
+{"id": "Q62", "category": "configuration_lookup", "difficulty": 3, "query": "集中定义 Provider 类型等全局常量的配置文件是哪个？", "expected_files": ["src/config/constants.ts"], "must_contain": ["constants"]}
+{"id": "Q63", "category": "configuration_lookup", "difficulty": 1, "query": "应用级前端配置（appConfig）在哪个文件？", "expected_files": ["src/config/appConfig.tsx"], "must_contain": ["appConfig"]}
+{"id": "Q64", "category": "component_location", "difficulty": 2, "query": "在不同 AI 工具/应用之间切换的组件是哪个？", "expected_files": ["src/components/AppSwitcher.tsx"], "must_contain": ["switcher"]}
+{"id": "Q65", "category": "component_location", "difficulty": 1, "query": "用于编辑 JSON 内容的组件在哪里？", "expected_files": ["src/components/JsonEditor.tsx"], "must_contain": ["json"]}
+{"id": "Q66", "category": "component_location", "difficulty": 1, "query": "Markdown 编辑器组件是哪个？", "expected_files": ["src/components/MarkdownEditor.tsx"], "must_contain": ["markdown"]}
+{"id": "Q67", "category": "component_location", "difficulty": 1, "query": "通用二次确认对话框组件在哪里？", "expected_files": ["src/components/ConfirmDialog.tsx"], "must_contain": ["confirm"]}
+{"id": "Q68", "category": "component_location", "difficulty": 2, "query": "提示用户数据库需要升级的组件是哪个？", "expected_files": ["src/components/DatabaseUpgrade.tsx"], "must_contain": ["database"]}
+{"id": "Q69", "category": "component_location", "difficulty": 2, "query": "处理 DeepLink 导入的对话框组件在哪里？", "expected_files": ["src/components/DeepLinkImportDialog.tsx"], "must_contain": ["deeplink"]}
+{"id": "Q70", "category": "api_usage", "difficulty": 3, "query": "`useSettings` 这个 hook 在哪个首次运行提示组件里被调用？", "expected_files": ["src/components/FirstRunNoticeDialog.tsx"], "must_contain": ["useSettings"]}
+{"id": "Q71", "category": "api_usage", "difficulty": 3, "query": "`useBackupManager` 在哪个备份列表组件中被使用？", "expected_files": ["src/components/settings/BackupListSection.tsx"], "must_contain": ["backup"]}
+{"id": "Q72", "category": "api_usage", "difficulty": 3, "query": "`useDragSort` 拖拽排序在哪个 Provider 列表组件里被调用？", "expected_files": ["src/components/providers/ProviderList.tsx"], "must_contain": ["dragsort"]}
+{"id": "Q73", "category": "api_usage", "difficulty": 3, "query": "`useSessionSearch` 在哪个会话管理页面组件中被使用？", "expected_files": ["src/components/sessions/SessionManagerPage.tsx"], "must_contain": ["session"]}
+{"id": "Q74", "category": "api_usage", "difficulty": 2, "query": "前端解析 DeepLink（`parse_deeplink`）所调用的 API 封装模块是哪个？", "expected_files": ["src/lib/api/deeplink.ts"], "must_contain": ["deeplink"]}
+{"id": "Q75", "category": "api_usage", "difficulty": 2, "query": "前端读取 omo 本地配置（`read_omo_local_file`）调用的 API 模块是哪个？", "expected_files": ["src/lib/api/omo.ts"], "must_contain": ["omo"]}
+{"id": "Q76", "category": "semantic_feature", "difficulty": 2, "query": "对 Provider 端点做连通测速的功能在哪里实现？", "expected_files": ["src-tauri/src/services/speedtest.rs"], "must_contain": ["speed"]}
+{"id": "Q77", "category": "semantic_feature", "difficulty": 3, "query": "托盘展示用的进程内写穿式用量缓存在哪里实现？", "expected_files": ["src-tauri/src/services/usage_cache.rs"], "must_contain": ["cache"]}
+{"id": "Q78", "category": "semantic_feature", "difficulty": 2, "query": "模型定价信息的结构与处理逻辑在哪里？", "expected_files": ["src-tauri/src/services/model_pricing.rs"], "must_contain": ["pricing"]}
+{"id": "Q79", "category": "semantic_feature", "difficulty": 3, "query": "跨 DAO 共享的用量聚合 SQL 片段辅助函数在哪里？", "expected_files": ["src-tauri/src/services/sql_helpers.rs"], "must_contain": ["sql"]}
+{"id": "Q80", "category": "error_handling", "difficulty": 2, "query": "代理层的错误类型定义在哪个文件？", "expected_files": ["src-tauri/src/proxy/error.rs"], "must_contain": ["error"]}
+{"id": "Q81", "category": "error_handling", "difficulty": 3, "query": "把上游服务错误映射成统一对外响应的模块是哪个？", "expected_files": ["src-tauri/src/proxy/error_mapper.rs"], "must_contain": ["mapper"]}
+{"id": "Q82", "category": "error_handling", "difficulty": 2, "query": "技能安装失败时的错误解析逻辑在哪里？", "expected_files": ["src/lib/errors/skillErrorParser.ts"], "must_contain": ["skill"]}
+{"id": "Q83", "category": "error_handling", "difficulty": 3, "query": "代理请求失败时自动切换到备用 Provider 的故障转移逻辑在哪里？", "expected_files": ["src-tauri/src/proxy/failover_switch.rs"], "must_contain": ["failover"]}
+{"id": "Q84", "category": "error_handling", "difficulty": 2, "query": "管理故障转移队列的前端组件是哪个？", "expected_files": ["src/components/proxy/FailoverQueueManager.tsx"], "must_contain": ["failover"]}
+{"id": "Q85", "category": "error_handling", "difficulty": 3, "query": "检测环境变量冲突（哪些变量会相互干扰）的服务在哪里？", "expected_files": ["src-tauri/src/services/env_checker.rs"], "must_contain": ["conflict"]}
+{"id": "Q86", "category": "error_handling", "difficulty": 2, "query": "代理转发过程中的用量日志记录在哪里？", "expected_files": ["src-tauri/src/proxy/usage/logger.rs"], "must_contain": ["logger"]}
+{"id": "Q87", "category": "architecture_understanding", "difficulty": 3, "query": "后端所有 Tauri 命令模块的统一聚合入口是哪个文件？", "expected_files": ["src-tauri/src/commands/mod.rs"], "must_contain": ["mod"]}
+{"id": "Q88", "category": "architecture_understanding", "difficulty": 2, "query": "前端 React 应用的挂载入口文件是哪个？", "expected_files": ["src/main.tsx"], "must_contain": ["main"]}
+{"id": "Q89", "category": "architecture_understanding", "difficulty": 3, "query": "SQLite 数据持久化模块的整体组织入口在哪里？", "expected_files": ["src-tauri/src/database/mod.rs"], "must_contain": ["database"]}
+{"id": "Q90", "category": "architecture_understanding", "difficulty": 3, "query": "代理服务器模块的整体结构入口是哪个文件？", "expected_files": ["src-tauri/src/proxy/mod.rs"], "must_contain": ["proxy"]}
+{"id": "Q91", "category": "architecture_understanding", "difficulty": 3, "query": "多端配置同步协议的设计与实现在哪里？", "expected_files": ["src-tauri/src/services/sync_protocol.rs"], "must_contain": ["sync"]}
+{"id": "Q92", "category": "architecture_understanding", "difficulty": 2, "query": "应用全局运行时状态的存储在哪个文件？", "expected_files": ["src-tauri/src/app_store.rs"], "must_contain": ["store"]}
+{"id": "Q93", "category": "architecture_understanding", "difficulty": 2, "query": "应用核心配置结构体的定义在哪个文件？", "expected_files": ["src-tauri/src/app_config.rs"], "must_contain": ["config"]}
+{"id": "Q94", "category": "cross_language", "difficulty": 2, "query": "Profile 配置档的增删改查在前端和后端的对应实现分别在哪里？", "expected_files": ["src/lib/api/profiles.ts", "src-tauri/src/commands/profile.rs"], "must_contain": ["profile"]}
+{"id": "Q95", "category": "cross_language", "difficulty": 2, "query": "订阅配额查询（`get_subscription_quota`）的前后端对应文件是？", "expected_files": ["src/lib/api/subscription.ts", "src-tauri/src/commands/subscription.rs"], "must_contain": ["subscription"]}
+{"id": "Q96", "category": "cross_language", "difficulty": 2, "query": "故障转移队列（`get_failover_queue`）的前后端对应实现在哪里？", "expected_files": ["src/lib/api/failover.ts", "src-tauri/src/commands/failover.rs"], "must_contain": ["failover"]}
+{"id": "Q97", "category": "cross_language", "difficulty": 2, "query": "用量汇总（`get_usage_summary`）的前后端对应文件是？", "expected_files": ["src/lib/api/usage.ts", "src-tauri/src/commands/usage.rs"], "must_contain": ["usage"]}
+{"id": "Q98", "category": "cross_language", "difficulty": 3, "query": "技能管理（`get_installed_skills`）的前后端对应实现在哪里？", "expected_files": ["src/lib/api/skills.ts", "src-tauri/src/commands/skill.rs"], "must_contain": ["skill"]}
+{"id": "Q99", "category": "cross_language", "difficulty": 3, "query": "会话管理（`list_sessions`）的前后端对应文件是？", "expected_files": ["src/lib/api/sessions.ts", "src-tauri/src/commands/session_manager.rs"], "must_contain": ["session"]}
+{"id": "Q100", "category": "cross_language", "difficulty": 3, "query": "流式连通检测（`stream_check_provider`）的前后端对应实现在哪里？", "expected_files": ["src/lib/api/connectivity-check.ts", "src-tauri/src/commands/stream_check.rs"], "must_contain": ["stream"]}

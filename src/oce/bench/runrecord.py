@@ -9,9 +9,10 @@
 effective 全集 + generation + pipeline token）。L0 的 effective 取自 reconfigure 之后
 get_config 的返回——即"这组分数是在这套确切生效参数下跑出来的"，read-after-write 已保证。
 
-JSON 是 compare 的唯一真源；md 是人读视图，由 report.py 从**同一次** EvaluationRun 渲染
-（头部注入 model/pipeline/profile/generation，补上旧报告不记录用了哪个模型的缺口）。二者
-同源，Commit 6 内不漂移；Commit 7 进一步让 md 从 RunRecord 渲染，使 .json 可离线重渲。
+JSON 是 compare 的唯一真源；md 是人读视图，由 report.py 的 ``render_record(record)`` 从**这份
+RunRecord 本身**渲染（头部自动注入 model/pipeline/profile/generation，补上旧报告不记录用了哪个
+模型的缺口）。md 从 JSON 同源渲染 -> 二者永不漂移，且 .json 可**离线重渲**（``oce bench report``
+读盘出 md，无需活服务、无需重跑查询）。
 """
 
 from __future__ import annotations
@@ -114,8 +115,13 @@ class RunRecord:
     index_reused: bool
     uploaded: int
     skipped: int
+    # 上传失败的具体原因（md 的 "Skipped files" 段离线重渲需要；通常为空）
+    skipped_reasons: list[str] = field(default_factory=list)
 
-    # --- token 用量（monitoring 开时从 /admin/reports/tokens 拉；Commit 7 接线）---
+    # --- token 用量（预留，默认 None）---
+    # /admin/reports/tokens 是**全窗口**聚合（近 N 小时、按桶），无法干净归因到"这一组参数
+    # 的这次 run"。硬塞会产出一个看似 per-run、实则全局的误导性数字（正是计划里"把假生效当
+    # 真数据"的坑）。待有 per-request token 计数端点再接；当前留空、不渲染进 md。
     tokens: dict[str, Any] | None = None
 
     # --- 同目录 md 文件名（人读视图）---
@@ -138,11 +144,16 @@ class RunRecord:
 
 
 def _row_to_dict(row: EvaluationRow) -> dict[str, Any]:
-    """EvaluationRow -> 精简 dict（不存 formatted 全文，太大；存路径与分数即可复盘）。"""
+    """EvaluationRow -> 精简 dict（不存 formatted 全文，太大；存路径与分数即可复盘）。
+
+    含 ``query`` 文本：md 的 "Details" 段离线重渲需要它（从 RunRecord 单源渲染，见
+    report.render_record）。formatted 全文太大不落盘，复盘时用 top_paths 已足够。
+    """
     return {
         "query_id": row.query_id,
         "category": row.category,
         "difficulty": row.difficulty,
+        "query": row.query,
         "expected_files": list(row.expected_files),
         "top_paths": list(row.top_paths),
         "top1_score": row.top1_score,
@@ -263,6 +274,8 @@ def build_run_record(
         index_reused=run.index.reused,
         uploaded=run.index.uploaded,
         skipped=len(run.index.skipped),
+        # 留存具体原因（通常为空），使 md 的 "Skipped files" 段可离线重渲（render_record）
+        skipped_reasons=list(run.index.skipped),
         tokens=tokens,
         md_filename=f"{run_id}.md",
     )

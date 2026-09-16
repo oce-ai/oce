@@ -1,12 +1,14 @@
-"""报告渲染测试（纯函数，用手工 EvaluationRun，不起服务）。
+"""报告渲染测试（纯函数，用手工 EvaluationRun / RunRecord，不起服务）。
 
-覆盖：聚合分数、按分类汇总、百分位、以及 Commit 4 的两处改进——解耦 git（repo_commit
-传参）与补 p50/p95 时延。extra_header_lines 是 Commit 7 注入 model/pipeline/generation 的
-预留口，此处一并锁定。
+覆盖：聚合分数、按分类汇总、百分位、Commit 4 的两处改进（解耦 git + 补 p50/p95），以及
+Commit 7 的**单一渲染体**——render_record(RunRecord) 与 render_report(EvaluationRun) 共用
+_render，故对同一份 EvaluationRun 二者输出逐字节相同（md 与 json 永不漂移的可执行证明），
+且 render_record 自动注入 model/pipeline/profile/generation 头部、能经 JSON 往返离线重渲。
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -16,9 +18,11 @@ from oce.bench.report import (
     compute_by_category,
     compute_totals,
     percentile,
+    render_record,
     render_report,
     write_report,
 )
+from oce.bench.runrecord import ParamSnapshot, build_run_record, load_record, save_record
 
 
 def _row(
@@ -206,3 +210,160 @@ class TestWriteReport:
         write_report(out, "# hi\n")
         assert out.is_file()
         assert out.read_text(encoding="utf-8") == "# hi\n"
+
+
+# ---------------------------------------------------------------------------
+# Commit 7：render_record（从 RunRecord 渲染）+ 单一渲染体不变量
+# ---------------------------------------------------------------------------
+
+_FIXED = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _snapshot(**over) -> ParamSnapshot:
+    base = dict(
+        embed_model="f2llm-v2-0.6b",
+        embed_dimensions=1024,
+        embed_endpoint="http://127.0.0.1:8994/v1/embeddings",
+        db_dialect="sqlite+aiosqlite",
+        milvus_mode="lite",
+        generation=7,
+        effective={
+            "retrieval": {"default_top_k": 30},
+            "flags": {"rerank_enabled": False, "llm_rerank_enabled": False},
+            "milvus": {"hnsw_ef_search": 512},
+            "rerank": {},
+        },
+        pipeline="llmrerank",
+    )
+    base.update(over)
+    return ParamSnapshot(**base)
+
+
+def _record(rows: list[EvaluationRow] | None = None, **over):
+    rows = rows or [
+        _row("Q1", "cat_a", top1=1, ndcg=1.0, client_ms=120),
+        _row("Q2", "cat_a", top1=0, ndcg=0.5, client_ms=200, difficulty=2),
+    ]
+    kwargs = dict(
+        repo_name="flask", repo_root=Path("/repo/flask"), repo_commit="abc123",
+        repo_dirty=False, queries_path=Path("/bench/flask.jsonl"), profile="local",
+        tag="sweep", base_url="http://127.0.0.1:8987", created_at=_FIXED,
+    )
+    kwargs.update(over)
+    return build_run_record(
+        run=_run(rows), params=_snapshot(), **kwargs,
+    )
+
+
+class TestRenderRecord:
+    def test_injects_param_header(self):
+        """render_record 自动注入旧报告缺失的 model/pipeline/profile/generation。"""
+        md = render_record(_record())
+        assert "Model: `f2llm-v2-0.6b`" in md
+        assert "(dim 1024)" in md
+        assert "Pipeline: `llmrerank`" in md
+        assert "Profile: `local` (tag `sweep`)" in md
+        assert "Config generation: 7" in md
+
+    def test_includes_run_id_and_total_table(self):
+        record = _record()
+        md = render_record(record)
+        assert "Run ID:" in md and record.run_id in md
+        assert "# OCE Retrieval Evaluation" in md
+        assert "## Total" in md
+        assert "## Categories" in md
+        assert "cat_a" in md
+
+    def test_date_from_created_at(self):
+        md = render_record(_record())
+        # created_at 是 ISO-8601；头部 Date 行据此（非空 -> 显示）
+        assert "- Date: 2026-09-15T12:00:00+00:00" in md
+
+    def test_repo_commit_and_dirty(self):
+        clean = render_record(_record(repo_commit="abc123", repo_dirty=False))
+        assert "Repository SHA: `abc123`" in clean
+        assert "Repository state:" not in clean  # clean -> 不标 dirty
+        dirty = render_record(_record(repo_commit="abc123", repo_dirty=True))
+        assert "dirty (uncommitted changes" in dirty
+
+    def test_details_per_query(self):
+        md = render_record(_record())
+        assert "### Q1 (cat_a, difficulty 1)" in md
+        assert "question Q1" in md  # query 文本入正文（离线重渲需要 _row_to_dict 存 query）
+        assert "### Q2 (cat_a, difficulty 2)" in md
+
+    def test_skipped_files_section(self):
+        """index.skipped 经 record.skipped_reasons 重渲进 'Skipped files' 段。"""
+        run = EvaluationRun(
+            rows=[_row("Q1", "cat_a", top1=1, ndcg=1.0)],
+            index=IndexOutcome(
+                blob_names=["n"], uploaded=1,
+                skipped=["too_big.bin", "binary.png"], reused=False,
+            ),
+            peak_rss_mb=1.0, wall_seconds=0.5, client_latencies_ms=[10],
+        )
+        record = build_run_record(
+            run=run, params=_snapshot(), repo_name="r", repo_root=Path("/r"),
+            repo_commit=None, repo_dirty=False, queries_path=Path("q.jsonl"),
+            profile="p", tag="t", base_url="http://x", created_at=_FIXED,
+        )
+        md = render_record(record)
+        assert "## Skipped files" in md
+        assert "too_big.bin" in md and "binary.png" in md
+        assert "Upload failures: 2" in md
+
+    def test_error_rows_section(self):
+        rows = [
+            _row("Q1", "cat_a", top1=0, ndcg=0.0, error="HTTP 500 boom"),
+            _row("Q2", "cat_a", top1=1, ndcg=1.0),
+        ]
+        md = render_record(_record(rows=rows))
+        assert "## Query errors" in md
+        assert "HTTP 500 boom" in md
+
+    def test_round_trip_via_json_matches(self, tmp_path):
+        """离线重渲：JSON 落盘 -> 读回 -> render_record，与内存里渲染逐字节相同。"""
+        record = _record()
+        in_memory = render_record(record)
+        path = save_record(record, tmp_path)
+        reloaded = load_record(path)
+        offline = render_record(reloaded)
+        assert offline == in_memory
+
+
+class TestSingleRenderBody:
+    """核心不变量：render_record 与 render_report 共用 _render -> 同源输出必一致。"""
+
+    def test_record_and_report_agree_on_same_run(self):
+        """同一份 EvaluationRun：render_record(record) == render_report(run, 等价头部)。
+
+        render_record 的头部是它从 record.params 自动注入的；render_report 需调用方经
+        extra_header_lines 传同样的行、且溯源字段一一对应，二者就该逐字节相同——证明两条
+        入口确实共用唯一渲染体，md 不可能与 json 漂移。
+        """
+        rows = [
+            _row("Q1", "cat_a", top1=1, ndcg=1.0, client_ms=120),
+            _row("Q2", "cat_a", top1=0, ndcg=0.5, client_ms=200, difficulty=2),
+        ]
+        run = _run(rows)
+        record = _record(rows=rows)
+        # render_record 自动注入的头部（顺序须与 report.render_record 内一致）
+        params = record.params
+        header = [
+            f"- Model: `{params.embed_model}` (dim {params.embed_dimensions})",
+            f"- Pipeline: `{params.pipeline}`",
+            f"- Profile: `{record.profile}` (tag `{record.tag}`)",
+            f"- Config generation: {params.generation}",
+            f"- Run ID: `{record.run_id}`",
+        ]
+        from_record = render_record(record)
+        from_report = render_report(
+            run,
+            base_url=record.base_url,
+            repo_root=Path(record.repo_root),
+            queries_path=Path(record.queries_path),
+            repo_commit=record.repo_commit,
+            date_str=record.created_at,
+            extra_header_lines=header,
+        )
+        assert from_record == from_report

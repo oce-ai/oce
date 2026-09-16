@@ -21,6 +21,7 @@ from oce.bench.compare import (
     load_runs,
     param_curve,
     per_query_delta,
+    promote_run,
     render_compare,
     summarize,
 )
@@ -269,3 +270,73 @@ def test_load_runs_missing_id_raises(tmp_path: Path):
 def test_load_runs_empty_dir_raises(tmp_path: Path):
     with pytest.raises(CompareError, match="no run records"):
         load_runs(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# promote_run：把 run 晋升进受追踪的 golden 目录（出 .gitignore 的 sweep 产物区）
+# ---------------------------------------------------------------------------
+
+
+def test_promote_copies_json_and_md(tmp_path: Path):
+    runs = tmp_path / "runs"
+    record = _record(30, 1, 1, 0.5)
+    save_record(record, runs)
+    # 配对的 md（sweep 会落，这里手工造一个验证 promote 一并搬运）
+    (runs / record.md_filename).write_text("# md\n", encoding="utf-8")
+    golden = tmp_path / "golden"
+
+    copied = promote_run(runs, record.run_id, golden_dir=golden)
+
+    assert len(copied) == 2
+    assert (golden / f"{record.run_id}.json").is_file()
+    assert (golden / record.md_filename).is_file()
+    # 原产物不动（只复制不移动 -> 仍可参与本地 compare）
+    assert (runs / f"{record.run_id}.json").is_file()
+
+
+def test_promote_json_only_when_no_md(tmp_path: Path):
+    runs = tmp_path / "runs"
+    record = _record(30, 1, 1, 0.5)
+    save_record(record, runs)  # 只有 json，无 md
+    golden = tmp_path / "golden"
+
+    copied = promote_run(runs, record.run_id, golden_dir=golden)
+
+    assert len(copied) == 1
+    assert copied[0].name == f"{record.run_id}.json"
+    assert (golden / f"{record.run_id}.json").is_file()
+    assert not list(golden.glob("*.md"))
+
+
+def test_promote_creates_golden_dir(tmp_path: Path):
+    runs = tmp_path / "runs"
+    record = _record(30, 1, 1, 0.5)
+    save_record(record, runs)
+    golden = tmp_path / "deep" / "nested" / "golden"  # 不存在 -> promote 自建
+
+    promote_run(runs, record.run_id, golden_dir=golden)
+
+    assert golden.is_dir()
+    assert (golden / f"{record.run_id}.json").is_file()
+
+
+def test_promote_unknown_run_raises(tmp_path: Path):
+    runs = tmp_path / "runs"
+    save_record(_record(30, 1, 1, 0.5), runs)
+    with pytest.raises(CompareError, match="not found"):
+        promote_run(runs, "ghost-run", golden_dir=tmp_path / "golden")
+
+
+def test_promote_copied_json_loads(tmp_path: Path):
+    """晋升后的 json 仍是合法 RunRecord（可被 compare / report 再读）。"""
+    from oce.bench.runrecord import load_record
+
+    runs = tmp_path / "runs"
+    record = _record(30, 1, 1, 0.5)
+    save_record(record, runs)
+    golden = tmp_path / "golden"
+    promote_run(runs, record.run_id, golden_dir=golden)
+
+    reloaded = load_record(golden / f"{record.run_id}.json")
+    assert reloaded.run_id == record.run_id
+    assert reloaded.score_pct == record.score_pct

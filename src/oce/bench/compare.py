@@ -16,6 +16,7 @@ markdown 反向刮分数**——脆弱、语义靠猜（附录一堆"缩写待�
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -24,7 +25,45 @@ from oce.bench.runrecord import RunRecord, list_records
 
 
 class CompareError(Exception):
-    """对比失败：找不到 baseline、空记录集、字段不可排序等。"""
+    """对比失败：找不到 baseline、空记录集、字段不可排序、promote 目标缺失等。"""
+
+
+# 受追踪的 golden baseline 子目录（相对仓库根）。sweep 产物（bench/runs/*）被 .gitignore，
+# 但 curated 的长期 baseline 落在此处、随仓库走 —— 满足"run 机制进 git"又不让产物撑爆仓库。
+GOLDEN_SUBDIR = Path("bench") / "runs" / "golden"
+
+
+def promote_run(
+    runs_dir: str | Path, run_id: str, golden_dir: str | Path | None = None
+) -> list[Path]:
+    """把一份 run 的 ``.json``（+ 配对的 ``.md`` 若有）复制进受追踪的 golden 目录。
+
+    长期保留的 baseline 用它"晋升"出 .gitignore 的 sweep 产物区。只复制、不移动 —— 原
+    runs_dir 的记录不动，便于继续参与本地 compare。返回复制出的目标路径列表。
+
+    Args:
+        runs_dir: 源 run 记录目录（``<run_id>.json`` 所在）。
+        run_id: 要晋升的 run（精确匹配，不做前缀模糊）。
+        golden_dir: 目标目录；None 用默认 ``bench/runs/golden``（相对 cwd）。
+    """
+    runs_dir = Path(runs_dir).expanduser()
+    golden_dir = Path(golden_dir).expanduser() if golden_dir else GOLDEN_SUBDIR
+    json_src = runs_dir / f"{run_id}.json"
+    if not json_src.is_file():
+        raise CompareError(
+            f"run '{run_id}' not found in {runs_dir} (expected {json_src.name})"
+        )
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    json_dst = golden_dir / json_src.name
+    shutil.copy2(json_src, json_dst)
+    copied.append(json_dst)
+    md_src = runs_dir / f"{run_id}.md"
+    if md_src.is_file():
+        md_dst = golden_dir / md_src.name
+        shutil.copy2(md_src, md_dst)
+        copied.append(md_dst)
+    return copied
 
 
 # ---------------------------------------------------------------------------

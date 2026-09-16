@@ -29,6 +29,7 @@ from oce.bench.compare import (
     CompareError,
     find_baseline,
     load_runs,
+    promote_run,
     render_compare,
 )
 from oce.bench.datasets import (
@@ -44,7 +45,9 @@ from oce.bench.profiles import (
     default_profiles_dir,
     load_profile,
 )
+from oce.bench.report import render_record, write_report
 from oce.bench.resources import build_meter
+from oce.bench.runrecord import load_record
 from oce.bench.sweep import (
     ParamSet,
     SweepContext,
@@ -363,8 +366,22 @@ def _run_sweep_blocking(
 
 
 def _cmd_compare(args: argparse.Namespace) -> None:
-    """读 N 份 RunRecord JSON 出对比矩阵（自动标注差异参数 + 逐题 delta + 可选曲线）。"""
+    """读 N 份 RunRecord JSON 出对比矩阵（自动标注差异参数 + 逐题 delta + 可选曲线）。
+
+    ``--promote <run_id>`` 是旁路：把一份 run 复制进受追踪的 golden 目录后即返回（不出矩阵），
+    用于把长期 baseline 晋升出 .gitignore 的 sweep 产物区。
+    """
     runs_dir = Path(args.runs).expanduser()
+
+    if args.promote:
+        try:
+            copied = promote_run(runs_dir, args.promote, golden_dir=args.golden_dir)
+        except CompareError as exc:
+            raise BenchCLIError(str(exc)) from exc
+        for path in copied:
+            print(f"promoted {path}")
+        return
+
     try:
         records = load_runs(runs_dir, run_ids=args.run_id or None)
         baseline = find_baseline(records, args.baseline)
@@ -383,6 +400,52 @@ def _cmd_compare(args: argparse.Namespace) -> None:
         print(f"wrote comparison to {out}")
     else:
         print(markdown)
+
+
+# ---------------------------------------------------------------------------
+# report（离线重渲：读 JSON 出 MD，无需活服务）
+# ---------------------------------------------------------------------------
+
+
+def _cmd_report(args: argparse.Namespace) -> None:
+    """从已落盘的 RunRecord JSON **离线**重渲 markdown（无需活服务、无需重跑查询）。
+
+    与 sweep 落盘走的是同一个 ``render_record``，故此处产出的 md 与当初 sweep 写出的 md
+    结构必然一致 —— 这就是"md 与 json 永不漂移"的可执行证明。``--run-id`` 不给则渲染目录
+    下全部记录。``--output`` 给目录则按 ``<run_id>.md`` 落盘，否则打到 stdout。
+    """
+    src = Path(args.run).expanduser()
+    if not src.exists():
+        raise BenchCLIError(f"no run records found in {src}")
+    if src.is_dir():
+        json_paths = sorted(src.glob("*.json"))
+        if args.run_id:
+            wanted = set(args.run_id)
+            json_paths = [p for p in json_paths if p.stem in wanted]
+            missing = wanted - {p.stem for p in json_paths}
+            if missing:
+                raise BenchCLIError(
+                    f"run_id(s) not found in {src}: {sorted(missing)}"
+                )
+        if not json_paths:
+            raise BenchCLIError(f"no run records found in {src}")
+    else:
+        json_paths = [src]
+
+    out_dir = Path(args.output).expanduser() if args.output else None
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    for path in json_paths:
+        try:
+            record = load_record(path)
+        except (OSError, ValueError, KeyError) as exc:
+            raise BenchCLIError(f"cannot read run record {path}: {exc}") from exc
+        markdown = render_record(record)
+        if out_dir is not None:
+            write_report(out_dir / f"{record.run_id}.md", markdown)
+            print(f"wrote {out_dir / (record.run_id + '.md')}")
+        else:
+            print(markdown)
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +554,33 @@ def build_bench_commands(bench_sub: argparse._SubParsersAction) -> None:
         help="按该字段值排序出参数曲线，如 retrieval.default_top_k",
     )
     p_cmp.add_argument("--output", default=None, help="写 markdown 到此文件（默认打印）")
+    p_cmp.add_argument(
+        "--promote", default=None, metavar="RUN_ID",
+        help="把该 run 复制进受追踪的 golden 目录（长期 baseline），随后退出（不出矩阵）",
+    )
+    p_cmp.add_argument(
+        "--golden-dir", default=None,
+        help="golden 目标目录（默认 bench/runs/golden）",
+    )
     p_cmp.set_defaults(handler=_guard(_cmd_compare))
+
+    # --- report（离线重渲）---
+    p_report = bench_sub.add_parser(
+        "report", help="Re-render markdown from saved run record JSON (offline)",
+    )
+    p_report.add_argument(
+        "--run", default=str(_DEFAULT_RUNS_DIR),
+        help="RunRecord JSON 文件或目录（目录则渲染其下全部/指定的记录）",
+    )
+    p_report.add_argument(
+        "--run-id", action="append",
+        help="目录模式下只渲这些 run_id（可重复）",
+    )
+    p_report.add_argument(
+        "--output", default=None,
+        help="输出目录（按 <run_id>.md 落盘）；不给则打印到 stdout",
+    )
+    p_report.set_defaults(handler=_guard(_cmd_report))
 
 
 def build_bench_parser(subparsers: argparse._SubParsersAction) -> None:

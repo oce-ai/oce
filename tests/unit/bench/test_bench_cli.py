@@ -47,6 +47,7 @@ def test_bench_mounted_on_main_parser():
         (["bench", "sweep", "--base-url", "http://x", "--repo", "flask",
           "--matrix", "m.toml"], "sweep"),
         (["bench", "compare", "--runs", "bench/runs"], "compare"),
+        (["bench", "report", "--run", "bench/runs"], "report"),
     ],
 )
 def test_subcommands_parse(argv, expected):
@@ -189,6 +190,110 @@ def test_cmd_compare_empty_dir_exit_2(tmp_path: Path, capsys):
         ns.handler(ns)
     assert ei.value.code == 2
     assert "no run records" in capsys.readouterr().err
+
+
+def test_cmd_compare_promote_copies_to_golden(tmp_path: Path, capsys):
+    """compare --promote 把一份 run 复制进 golden 目录后退出（不出矩阵）。"""
+    runs = tmp_path / "runs"
+    record = _record(30, 1)
+    save_record(record, runs)
+    golden = tmp_path / "golden"
+    ns = main_cli.build_parser().parse_args([
+        "bench", "compare", "--runs", str(runs),
+        "--promote", record.run_id, "--golden-dir", str(golden),
+    ])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert "promoted" in out
+    assert (golden / f"{record.run_id}.json").is_file()
+    # promote 是旁路：不应出对比矩阵
+    assert "OCE Retrieval Comparison" not in out
+
+
+def test_cmd_compare_promote_unknown_exit_2(tmp_path: Path, capsys):
+    runs = tmp_path / "runs"
+    save_record(_record(30, 1), runs)
+    ns = main_cli.build_parser().parse_args([
+        "bench", "compare", "--runs", str(runs),
+        "--promote", "ghost-run", "--golden-dir", str(tmp_path / "golden"),
+    ])
+    with pytest.raises(SystemExit) as ei:
+        ns.handler(ns)
+    assert ei.value.code == 2
+    assert "not found" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# report（离线重渲：读 JSON 出 MD，无需活服务）
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_report_renders_to_stdout(tmp_path: Path, capsys):
+    """report --run <dir>：把目录下记录离线重渲到 stdout。"""
+    save_record(_record(30, 1), tmp_path)
+    ns = main_cli.build_parser().parse_args(["bench", "report", "--run", str(tmp_path)])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert "# OCE Retrieval Evaluation" in out
+    assert "Model:" in out and "Pipeline:" in out  # render_record 自动注入头部
+
+
+def test_cmd_report_writes_to_output_dir(tmp_path: Path, capsys):
+    save_record(_record(30, 1), tmp_path)
+    out_dir = tmp_path / "md"
+    ns = main_cli.build_parser().parse_args([
+        "bench", "report", "--run", str(tmp_path), "--output", str(out_dir),
+    ])
+    ns.handler(ns)
+    files = list(out_dir.glob("*.md"))
+    assert len(files) == 1
+    assert "# OCE Retrieval Evaluation" in files[0].read_text(encoding="utf-8")
+    assert "wrote" in capsys.readouterr().out
+
+
+def test_cmd_report_single_json_file(tmp_path: Path, capsys):
+    """--run 指向单个 .json 文件也能渲。"""
+    record = _record(30, 1)
+    path = save_record(record, tmp_path)
+    ns = main_cli.build_parser().parse_args(["bench", "report", "--run", str(path)])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert record.run_id in out
+
+
+def test_cmd_report_filter_by_run_id(tmp_path: Path, capsys):
+    save_record(_record(30, 1), tmp_path)
+    r2 = _record(80, 2)
+    save_record(r2, tmp_path)
+    ns = main_cli.build_parser().parse_args([
+        "bench", "report", "--run", str(tmp_path), "--run-id", r2.run_id,
+    ])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert r2.run_id in out
+    # 第一份未被选中 -> 其 run_id 不出现在输出里
+    assert out.count("# OCE Retrieval Evaluation") == 1
+
+
+def test_cmd_report_empty_dir_exit_2(tmp_path: Path, capsys):
+    ns = main_cli.build_parser().parse_args([
+        "bench", "report", "--run", str(tmp_path / "empty"),
+    ])
+    with pytest.raises(SystemExit) as ei:
+        ns.handler(ns)
+    assert ei.value.code == 2
+    assert "no run records" in capsys.readouterr().err
+
+
+def test_cmd_report_missing_run_id_exit_2(tmp_path: Path, capsys):
+    save_record(_record(30, 1), tmp_path)
+    ns = main_cli.build_parser().parse_args([
+        "bench", "report", "--run", str(tmp_path), "--run-id", "ghost",
+    ])
+    with pytest.raises(SystemExit) as ei:
+        ns.handler(ns)
+    assert ei.value.code == 2
+    assert "not found" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

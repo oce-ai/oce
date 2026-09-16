@@ -40,7 +40,7 @@ from oce.bench.harness import (
     load_queries,
     run_queries,
 )
-from oce.bench.report import render_report, write_report
+from oce.bench.report import render_record, write_report
 from oce.bench.resources import ResourceMeter
 from oce.bench.runrecord import (
     ParamSnapshot,
@@ -262,21 +262,6 @@ class SweepContext:
             pipeline=pipeline_token(flags),
         )
 
-    def header_lines(self, record: RunRecord) -> list[str]:
-        """MD 头部行：model / pipeline / profile / generation / run_id。
-
-        这些正是旧报告缺失、逼出文件名约定反向推断的信息。从结构化 record 直接渲染，与
-        JSON 同源，杜绝漂移。
-        """
-        params = record.params
-        return [
-            f"- Model: `{params.embed_model}` (dim {params.embed_dimensions})",
-            f"- Pipeline: `{params.pipeline}`",
-            f"- Profile: `{self.profile_name}` (tag `{self.tag}`)",
-            f"- Config generation: {params.generation}",
-            f"- Run ID: `{record.run_id}`",
-        ]
-
 
 # ---------------------------------------------------------------------------
 # 扫描主循环
@@ -304,8 +289,8 @@ async def run_sweep(
        a. 非空则 ``client.reconfigure``（read-after-write 校验 generation 前进 + effective⊇patch）；
           空集则用当前配置（只 GET 一次拿 effective）。
        b. ``run_queries``（**不重新索引**，复用上一步的 scope）。
-       c. ``build_run_record`` + ``save_record`` 落 JSON，``render_report`` + ``write_report``
-          落同源 MD（头部注入 model/pipeline/profile/generation）。
+       c. ``build_run_record`` + ``save_record`` 落 JSON，``render_record`` + ``write_report``
+          从该 record 落同源 MD（头部注入 model/pipeline/profile/generation）。
     3. 返回全部 RunRecord（compare 直接吃）。
 
     created_at_provider 便于测试注入固定时钟（默认 datetime.now(timezone.utc)，AGENTS.md
@@ -391,18 +376,11 @@ async def run_sweep(
         )
         json_path = save_record(record, runs_dir)
 
-        # MD 人读视图：与 JSON 同源（同一 EvaluationRun），头部注入 model/pipeline/
-        # profile/generation（补上旧报告不记录用了哪个模型的缺口）。
+        # MD 人读视图：与 JSON **同源**（render_record 直接吃刚落盘的 RunRecord），头部自动
+        # 注入 model/pipeline/profile/generation（补上旧报告不记录用了哪个模型的缺口）。这条
+        # 路径与离线重渲（oce bench report 读 JSON）走的是同一个函数，故 md 与 json 永不漂移。
         md_path = runs_dir / record.md_filename
-        markdown = render_report(
-            run,
-            base_url=str(client.base_url),
-            repo_root=context.repo_root,
-            queries_path=context.queries_path,
-            repo_commit=context.repo_commit,
-            date_str=record.created_at,
-            extra_header_lines=context.header_lines(record),
-        )
+        markdown = render_record(record)
         write_report(md_path, markdown)
 
         emit(

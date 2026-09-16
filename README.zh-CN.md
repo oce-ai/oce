@@ -48,7 +48,7 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 - **ACE 兼容 API** —— 面向 ACE 客户端的 `/agents/*` 接口，Bearer 鉴权保护。
 - **清晰的 DDD/CQRS 架构** —— 依赖向内收敛；infrastructure 只由 composition root 装配，业务逻辑保持可测。
 - **运维 admin API + 监控** —— 独立 admin key 的接口面管理模型凭据、嵌入队列与垃圾回收；旁路 metrics 管线记录调用/token/资源指标与检索各阶段审计。
-- **[可复现的评测框架](https://github.com/oce-ai/oce-benchmark)** —— 纯 HTTP 的基准套件，用 Top-1 + nDCG@10 在真实仓库上衡量检索质量。
+- **可复现的评测框架** —— 内置 `oce bench` 命令链用 Top-1 + nDCG@10 在真实仓库上衡量检索质量；一次索引扫 N 组参数，支持 L0 热改秒级切换。详见[评测框架](#评测框架)。
 
 <details>
 <summary><strong>目录</strong></summary>
@@ -61,6 +61,7 @@ OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 
 - [API](#api)
 - [架构](#架构)
   - [检索管线](#检索管线)
+- [评测框架](#评测框架)
 - [测试](#测试)
 - [许可](#许可)
 
@@ -378,6 +379,37 @@ flowchart TB
     PathBoost --> Select
     Select --> Out["最终命中（按融合分降序）"]
 ```
+
+## 评测框架
+
+`oce bench` 用 Top-1 + nDCG@10（每题 2 分）在真实仓库上通过 HTTP 评估检索质量。它把原本分散在独立仓库的 benchmark 能力合并为一条命令链。
+
+核心理念是**分层热调参 + 索引复用**：把"改参数"按代价分三层，让最贵的动作只发生一次。
+
+| 层级 | 参数 | 代价 | 动作 |
+|---|---|---|---|
+| **L0** | 查询期参数（top_k / rrf_k / path_boost / 组件开关 / rerank 阈值…） | **秒级**，不重启不重建索引 | 通过 admin 热改端点 `reconfigure` / `sweep` |
+| **L1** | 切块 / 向量索引参数（chunk_size / HNSW M、efConstruction） | 分钟级，重嵌入但不重启 | drop collection + reindex |
+| **L2** | 嵌入模型 / 维度 / 存储后端 | 最贵，完整 reset + 重启 + 重嵌入 | 切换 profile 并重启 |
+
+`sweep` 索引一次，然后对每组参数热切换 L0 配置、跑查询、记录 `RunRecord`。热切换采用**重建 + 原子重注册**（不原地改属性），并在切换后做 read-after-write 校验（`generation` 前进且 `effective ⊇ patch`）再评分。
+
+```bash
+# 零依赖本地 profile（SQLite + Milvus Lite，同步嵌入）：
+uv run oce bench serve --profile local --tag dev --port 8987    # 终端 1（长驻）
+uv run oce bench run   --base-url http://127.0.0.1:8987 --repo flask   # 终端 2
+
+# 索引一次，扫 N 组 L0 参数（秒级切换，无需重嵌入）：
+uv run oce bench sweep   --base-url http://127.0.0.1:8987 --repo flask \
+    --matrix bench/profiles/sweep_topk.example.toml --reuse-index
+uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
+```
+
+每次 run 写 `<run_id>.json`（compare 的唯一真源）和 `<run_id>.md`（人读视图）到 `bench/runs/`；二者从同一份 `RunRecord` 渲染，永不漂移。`compare` 自动标注每列改了哪个参数（无需文件名约定）。长期保留的 baseline 用 `compare --promote <run_id>` 晋升进受追踪的 `bench/runs/golden/`。
+
+**安全闸**：热改端点仅在服务启动时设了 `OCE_BENCH_HOT_CONFIG=allow`（由 `oce bench serve` 注入）时才放行，否则返回 409。因此正常部署的 `oce serve` 永远不会被热改检索行为。`oce bench reset` 额外拒绝任何不含 `oce_bench` 的 DB URL，且永不 drop 受保护的生产 collection。
+
+数据集随包发布（`src/oce/bench/datasets/`）。Profile 位于 `bench/profiles/*.toml`；密钥通过 `<field>_env = "VAR_NAME"` 引用，从环境变量或被 gitignore 的 `bench/profiles/secrets.env` 解析——绝不写明文。完整指南见 [`docs/evaluation-guide.md`](docs/evaluation-guide.md)。
 
 ## 测试
 

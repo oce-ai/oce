@@ -42,15 +42,20 @@ class FakeService:
         }
         self.config_post_status = 200
         self.config_post_detail: dict | str = {}
+        self.upload_status: int | None = None
+        self.auth_headers: list[tuple[str, str | None]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         body = json.loads(request.content) if request.content else {}
+        self.auth_headers.append((path, request.headers.get("authorization")))
 
         if path == "/health":
             return httpx.Response(200, json={"status": "ok"})
 
         if path == "/batch-upload":
+            if self.upload_status is not None:
+                return httpx.Response(self.upload_status, text="upload failed")
             blobs = body.get("blobs", [])
             paths = [b["path"] for b in blobs]
             # 若本批含"毒文件"，整批 422（触发 poison-split 二分）
@@ -186,6 +191,33 @@ async def test_upload_http_error_on_non_poison_single():
         names, skipped = await client.upload_batch([SourceBlob("only.py", "x")])
     assert names == []
     assert len(skipped) == 1
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+async def test_upload_systemic_error_aborts_without_poison_split(status):
+    service = FakeService()
+    service.upload_status = status
+    async with _client(service) as client:
+        with pytest.raises(BenchHTTPError) as exc:
+            await client.upload_batch([SourceBlob("a.py", "x"), SourceBlob("b.py", "y")])
+    assert exc.value.status_code == status
+    assert sum(path == "/batch-upload" for path, _ in service.auth_headers) == 1
+
+
+async def test_data_and_admin_endpoints_use_separate_keys():
+    service = FakeService()
+    client = BenchClient(
+        "http://bench.test",
+        "data-key",
+        admin_api_key="admin-key",
+        transport=httpx.MockTransport(service.handler),
+    )
+    async with client:
+        await client.upload_batch([SourceBlob("a.py", "x")])
+        await client.get_config()
+    headers = dict(service.auth_headers)
+    assert headers["/batch-upload"] == "Bearer data-key"
+    assert headers["/admin/bench/retrieval-config"] == "Bearer admin-key"
 
 
 # ---------------------------------------------------------------------------

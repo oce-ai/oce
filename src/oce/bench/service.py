@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from sqlalchemy.engine import make_url
+
 from oce.bench.profiles import Profile, apply_profile
 
 # 生产 collection 红线：reset 绝不 drop 这些（照搬 reset_bench.py 的 PROTECTED）。
@@ -135,11 +137,28 @@ def serve(
 
 
 def assert_resettable_db_url(db_url: str) -> None:
-    """硬闸①：DB URL 必须含 ``oce_bench``，否则拒绝（绝不碰生产库）。"""
-    if "oce_bench" not in db_url:
+    """硬闸①：解析后的数据库名必须是专用 bench 名，不能靠 URL 其余部分碰巧命中。"""
+    try:
+        database = make_url(db_url).database
+    except Exception as exc:
+        raise ServiceError("refusing to reset: DB_URL is invalid") from exc
+    name = Path(database or "").stem
+    if name != "oce_bench" and not name.startswith("oce_bench_"):
         raise ServiceError(
-            f"refusing to reset: DB_URL does not contain 'oce_bench': {db_url}"
+            f"refusing to reset: database name must be 'oce_bench' or start with "
+            f"'oce_bench_' (got {name!r})"
         )
+
+
+def _assert_path_within_data_dir(path: Path, data_dir: Path, *, label: str) -> Path:
+    """本地 reset 只能删除 data_dir 内的文件，防止 profile 指向任意路径。"""
+    resolved = path.expanduser().resolve()
+    root = data_dir.expanduser().resolve()
+    if not resolved.is_relative_to(root):
+        raise ServiceError(
+            f"refusing to reset: {label} path must be inside data_dir ({root})"
+        )
+    return resolved
 
 
 def resettable_collections(names: Sequence[str]) -> tuple[list[str], list[str]]:
@@ -201,8 +220,16 @@ def plan_reset(profile: Profile, tag: str, *, data_dir: Path) -> ResetPlan:
 
     if is_sqlite:
         # sqlite:/// + 绝对路径 -> 去掉 '///' 前缀取文件路径
-        sqlite_db_path = Path(db_url.split("///", 1)[-1])
-        milvus_lite_path = Path(milvus_endpoint) if milvus_is_lite else None
+        sqlite_db_path = _assert_path_within_data_dir(
+            Path(make_url(db_url).database or ""), data_dir, label="sqlite database"
+        )
+        milvus_lite_path = (
+            _assert_path_within_data_dir(
+                Path(milvus_endpoint), data_dir, label="Milvus Lite database"
+            )
+            if milvus_is_lite
+            else None
+        )
         return ResetPlan(
             db_url=db_url,
             is_sqlite=True,

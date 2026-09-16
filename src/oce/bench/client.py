@@ -123,6 +123,7 @@ class BenchClient:
         base_url: str,
         api_key: str,
         *,
+        admin_api_key: str | None = None,
         timeout: float = 120.0,
         poll_interval: float = 5.0,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -134,6 +135,9 @@ class BenchClient:
         self._poll_interval = poll_interval
         self._log = log
         self._headers = {"Authorization": f"Bearer {api_key}"}
+        self._admin_headers = {
+            "Authorization": f"Bearer {admin_api_key or api_key}"
+        }
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=httpx.Timeout(timeout),
@@ -168,8 +172,12 @@ class BenchClient:
             )
         return response.json()
 
-    async def _get(self, path: str, *, auth: bool = True) -> Any:
-        headers = self._headers if auth else {}
+    async def _get(
+        self, path: str, *, auth: bool = True, admin: bool = False
+    ) -> Any:
+        headers = self._admin_headers if admin else self._headers
+        if not auth:
+            headers = {}
         response = await self._client.get(path, headers=headers)
         if response.status_code != 200:
             raise BenchHTTPError(
@@ -202,6 +210,15 @@ class BenchClient:
         )
         if response.status_code == 200:
             return list(response.json().get("blob_names", [])), []
+        # 只有内容/载荷级错误适合二分定位。鉴权、限流和服务故障必须终止整次 run，
+        # 否则会被伪装成 skipped 文件和检索质量下降。
+        if response.status_code not in {400, 413, 422}:
+            raise BenchHTTPError(
+                response.status_code,
+                response.text,
+                method="POST",
+                path=_UPLOAD_PATH,
+            )
         if len(batch) == 1:
             reason = (
                 f"{batch[0].path}: HTTP {response.status_code} "
@@ -327,7 +344,7 @@ class BenchClient:
 
     async def get_config(self) -> ConfigSnapshot:
         """GET 当前生效配置 + generation。"""
-        data = await self._get(_CONFIG_PATH)
+        data = await self._get(_CONFIG_PATH, admin=True)
         return ConfigSnapshot(
             generation=int(data["generation"]),
             effective=dict(data.get("effective", {})),
@@ -357,7 +374,7 @@ class BenchClient:
         before = await self.get_config() if verify else None
 
         response = await self._client.post(
-            _CONFIG_PATH, headers=self._headers, json=patch
+            _CONFIG_PATH, headers=self._admin_headers, json=patch
         )
         if response.status_code != 200:
             try:

@@ -125,6 +125,22 @@ def _resolve_api_key(explicit: str | None) -> str:
     )
 
 
+def _resolve_admin_api_key(explicit: str | None, data_api_key: str) -> str:
+    """Admin key 优先级；未独立配置时按服务端语义回落 data API key。"""
+    import os
+
+    return next(
+        value
+        for value in (
+            explicit,
+            os.environ.get("OCE_BENCH_ADMIN_API_KEY"),
+            os.environ.get("ADMIN_API_KEY"),
+            data_api_key,
+        )
+        if value
+    )
+
+
 def _git_state(repo_root: Path) -> tuple[str | None, bool]:
     """取被测仓库的 HEAD commit 与 dirty 状态（溯源 + lock 判断）。取不到则 (None, False)。
 
@@ -272,9 +288,12 @@ def _cmd_reset(args: argparse.Namespace) -> None:
 def _cmd_reconfigure(args: argparse.Namespace) -> None:
     """对运行中的服务下发一组 L0 patch（read-after-write 校验），打印生效快照。"""
     api_key = _resolve_api_key(args.api_key)
+    admin_api_key = _resolve_admin_api_key(args.admin_api_key, api_key)
 
     async def _run() -> None:
-        async with BenchClient(args.base_url, api_key, log=_log) as client:
+        async with BenchClient(
+            args.base_url, api_key, admin_api_key=admin_api_key, log=_log
+        ) as client:
             if args.show:
                 snap = await client.get_config()
                 print(f"generation={snap.generation}")
@@ -306,8 +325,11 @@ def _cmd_run(args: argparse.Namespace) -> None:
     dataset, repo_root = _resolve_dataset_and_repo(args)
     context = _build_context(args, dataset, repo_root)
     api_key = _resolve_api_key(args.api_key)
+    admin_api_key = _resolve_admin_api_key(args.admin_api_key, api_key)
     param_sets: Sequence[ParamSet] = [param_set_from_args(args.param or [], name="run")]
-    _run_sweep_blocking(args, context, api_key, param_sets, reuse_index=args.reuse_index)
+    _run_sweep_blocking(
+        args, context, api_key, admin_api_key, param_sets, reuse_index=args.reuse_index
+    )
 
 
 def _cmd_sweep(args: argparse.Namespace) -> None:
@@ -315,17 +337,21 @@ def _cmd_sweep(args: argparse.Namespace) -> None:
     dataset, repo_root = _resolve_dataset_and_repo(args)
     context = _build_context(args, dataset, repo_root)
     api_key = _resolve_api_key(args.api_key)
+    admin_api_key = _resolve_admin_api_key(args.admin_api_key, api_key)
     try:
         param_sets = load_matrix(args.matrix)
     except SweepError as exc:
         raise BenchCLIError(str(exc)) from exc
-    _run_sweep_blocking(args, context, api_key, param_sets, reuse_index=args.reuse_index)
+    _run_sweep_blocking(
+        args, context, api_key, admin_api_key, param_sets, reuse_index=args.reuse_index
+    )
 
 
 def _run_sweep_blocking(
     args: argparse.Namespace,
     context: SweepContext,
     api_key: str,
+    admin_api_key: str,
     param_sets: Sequence[ParamSet],
     *,
     reuse_index: bool,
@@ -338,6 +364,7 @@ def _run_sweep_blocking(
         async with BenchClient(
             args.base_url,
             api_key,
+            admin_api_key=admin_api_key,
             timeout=args.timeout,
             poll_interval=args.poll_interval,
             log=_log,
@@ -457,6 +484,10 @@ def _add_common_run_args(parser: argparse.ArgumentParser) -> None:
     """run/sweep 共用参数：连服务 + 数据集 + 产物 + 调参 + 资源。"""
     parser.add_argument("--base-url", required=True, help="运行中的评测服务基址")
     parser.add_argument("--api-key", default=None, help="服务 API key（默认取环境变量）")
+    parser.add_argument(
+        "--admin-api-key", default=None,
+        help="运维面 API key（默认取 OCE_BENCH_ADMIN_API_KEY/ADMIN_API_KEY，再回落 API key）",
+    )
     parser.add_argument("--repo", required=True, help="数据集别名 / 仓库短名 / 唯一前缀")
     parser.add_argument("--repo-root", default=None, help="覆盖被测仓库本地路径")
     parser.add_argument(
@@ -518,6 +549,7 @@ def build_bench_commands(bench_sub: argparse._SubParsersAction) -> None:
     )
     p_reconf.add_argument("--base-url", required=True)
     p_reconf.add_argument("--api-key", default=None)
+    p_reconf.add_argument("--admin-api-key", default=None)
     p_reconf.add_argument(
         "--param", action="append", metavar="KEY=VALUE",
         help="可重复；KEY 按 L0 白名单路由到对应组，拼错报错",

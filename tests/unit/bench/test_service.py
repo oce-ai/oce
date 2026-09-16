@@ -60,8 +60,15 @@ def test_assert_resettable_db_url_accepts_bench():
 
 
 def test_assert_resettable_db_url_rejects_production():
-    with pytest.raises(ServiceError, match="does not contain 'oce_bench'"):
+    with pytest.raises(ServiceError, match="database name must be"):
         assert_resettable_db_url("postgresql+asyncpg://u:p@h/oce_production")
+
+
+def test_assert_resettable_db_url_rejects_bench_marker_in_password():
+    with pytest.raises(ServiceError, match="database name must be"):
+        assert_resettable_db_url(
+            "postgresql+asyncpg://u:oce_bench_secret@h/oce_production"
+        )
 
 
 def test_assert_resettable_db_url_rejects_empty():
@@ -163,7 +170,41 @@ def test_plan_reset_runs_db_url_guard_at_plan_time(tmp_path: Path):
         service=Service(), embedding=Embedding(), rerank=Rerank(), llm=LLM(),
         pipeline=Pipeline(), source_path=tmp_path / "bad.toml",
     )
-    with pytest.raises(ServiceError, match="does not contain 'oce_bench'"):
+    with pytest.raises(ServiceError, match="database name must be"):
+        plan_reset(profile, "v1", data_dir=tmp_path / "data")
+
+
+def test_plan_reset_rejects_sqlite_path_outside_data_dir(tmp_path: Path):
+    profile = _local_profile(tmp_path)
+    profile = Profile(
+        **{
+            **profile.__dict__,
+            "backend": Backend(
+                db_dialect="sqlite+aiosqlite",
+                db_path=str(tmp_path / "outside" / "oce_bench.db"),
+                milvus_mode="lite",
+                milvus_path="{data_dir}/oce_bench_milvus.db",
+            ),
+        }
+    )
+    with pytest.raises(ServiceError, match="inside data_dir"):
+        plan_reset(profile, "v1", data_dir=tmp_path / "data")
+
+
+def test_plan_reset_rejects_milvus_lite_path_outside_data_dir(tmp_path: Path):
+    profile = _local_profile(tmp_path)
+    profile = Profile(
+        **{
+            **profile.__dict__,
+            "backend": Backend(
+                db_dialect="sqlite+aiosqlite",
+                db_path="{data_dir}/oce_bench.db",
+                milvus_mode="lite",
+                milvus_path=str(tmp_path / "outside" / "milvus.db"),
+            ),
+        }
+    )
+    with pytest.raises(ServiceError, match="inside data_dir"):
         plan_reset(profile, "v1", data_dir=tmp_path / "data")
 
 

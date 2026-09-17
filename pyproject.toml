@@ -68,20 +68,25 @@ dev = [
 oce = "oce.cli:main"
 
 [build-system]
-# setuptools>=77 支持 PEP 639 的 license 字符串写法与 license-files
-requires = ["setuptools>=77", "wheel"]
-build-backend = "setuptools.build_meta"
+# hatchling：支持 force-include，把仓库根 bench/datasets 映射进 wheel 的 oce/bench/datasets
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["oce*"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/oce"]
 
-[tool.setuptools.package-data]
-# alembic 模板只在 wheel 中存在时，个人模式 oce serve 才能离线跑迁移
-"oce.alembic" = ["script.py.mako"]
-# 评测数据集随包发布：uv tool install 后 oce bench run 即可用，无需 checkout oce 仓库。
-# datasets/ 是纯数据目录（无 __init__.py），故 glob 挂在父包 oce.bench 下。
-"oce.bench" = ["datasets/*.jsonl", "datasets/*.metadata.json"]
+# 评测数据集源在仓库根 bench/datasets/（与 profiles/runs 同级、源码树干净），
+# 构建 wheel 时 force-include 进包——uv tool install 后 oce bench run 即可用。
+# 注意：editable 安装（uv run）不带 force-include 的拷贝，checkout 场景由
+# datasets.py 的仓库根回落路径负责解析。
+[tool.hatch.build.targets.wheel.force-include]
+"bench/datasets" = "oce/bench/datasets"
+# 零密钥 profile 模板进包：pip 用户 `oce bench serve --profile local` 直接可用，
+# 或 `oce bench init` 落盘到 ~/.oce/bench/profiles/ 再编辑。
+# 用户改过的（docker.toml / secrets.env）不进包。
+"bench/profiles/local.toml" = "oce/bench/profiles/local.toml"
+"bench/profiles/docker.example.toml" = "oce/bench/profiles/docker.example.toml"
+"bench/profiles/sweep_topk.example.toml" = "oce/bench/profiles/sweep_topk.example.toml"
 
 # ==================== Pytest 配置 ====================
 [tool.pytest.ini_options]

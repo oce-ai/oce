@@ -392,3 +392,125 @@ def test_resolve_profile_example_suffix():
 def test_resolve_profile_unknown_raises():
     with pytest.raises(bench_cli.BenchCLIError, match="not found"):
         bench_cli._resolve_profile("no-such-profile")
+
+
+# ---------------------------------------------------------------------------
+# init（把包内模板落盘到 ~/.oce/bench/profiles/）
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_init_writes_templates_to_home(tmp_path, monkeypatch, capsys):
+    """oce bench init 把包内模板落盘到 ~/.oce/bench/profiles/。"""
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    ns = main_cli.build_parser().parse_args(["bench", "init"])
+    ns.handler(ns)
+
+    target_dir = fake_home / ".oce" / "bench" / "profiles"
+    assert target_dir.is_dir()
+    # 至少 local.toml 应该被落盘
+    assert (target_dir / "local.toml").is_file()
+    out = capsys.readouterr().out
+    assert "Written" in out
+    assert "local.toml" in out
+
+
+def test_cmd_init_skips_existing_without_force(tmp_path, monkeypatch, capsys):
+    """已存在的同名文件默认跳过，--force 覆盖。"""
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    # 第一次 init
+    ns = main_cli.build_parser().parse_args(["bench", "init"])
+    ns.handler(ns)
+    capsys.readouterr()
+
+    target_dir = fake_home / ".oce" / "bench" / "profiles"
+    local_path = target_dir / "local.toml"
+    assert local_path.is_file()
+    original_content = local_path.read_text(encoding="utf-8")
+
+    # 改一下内容，验证默认跳过
+    local_path.write_text("# modified\n", encoding="utf-8")
+
+    # 第二次 init（无 --force）
+    ns = main_cli.build_parser().parse_args(["bench", "init"])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert "Skipped" in out
+    assert local_path.read_text(encoding="utf-8") == "# modified\n"
+
+    # 第三次 init（--force）
+    ns = main_cli.build_parser().parse_args(["bench", "init", "--force"])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    assert "Written" in out
+    assert local_path.read_text(encoding="utf-8") == original_content
+
+
+def test_resolve_profile_finds_home_tier(tmp_path, monkeypatch):
+    """--profile 短名在 home 目录命中（cwd 没有时）。"""
+    fake_home = tmp_path / "home"
+    home_profiles = fake_home / ".oce" / "bench" / "profiles"
+    home_profiles.mkdir(parents=True)
+
+    # 写一份自定义 profile 到 home
+    custom = home_profiles / "custom.toml"
+    custom.write_text("""
+[backend]
+db_path = "{data_dir}/x.db"
+milvus_path = "{data_dir}/m.db"
+""", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    # cwd 下 bench/profiles/ 不存在（测试环境），home 下的 custom 应被找到
+    profile = bench_cli._resolve_profile("custom")
+    assert profile.name == "custom"
+    assert str(home_profiles) in str(custom)
+
+
+def test_resolve_profile_cwd_wins_over_home(tmp_path, monkeypatch):
+    """cwd 优先级高于 home：同名 profile cwd 命中即返回。"""
+    fake_home = tmp_path / "home"
+    home_profiles = fake_home / ".oce" / "bench" / "profiles"
+    home_profiles.mkdir(parents=True)
+
+    # home 写一份
+    (home_profiles / "local.toml").write_text("""
+[backend]
+db_path = "{data_dir}/home.db"
+milvus_path = "{data_dir}/m.db"
+""", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    # cwd 下 bench/profiles/local.toml 存在（仓库根）
+    profile = bench_cli._resolve_profile("local")
+    # 应该命中 cwd 的（仓库根），不是 home 的
+    assert "home.db" not in str(profile.backend.db_path)
+
+
+def test_cmd_list_shows_three_tiers(tmp_path, monkeypatch, capsys):
+    """list 按三级分别列出 profile。"""
+    fake_home = tmp_path / "home"
+    home_profiles = fake_home / ".oce" / "bench" / "profiles"
+    home_profiles.mkdir(parents=True)
+    (home_profiles / "myprofile.toml").write_text("""
+[backend]
+db_path = "{data_dir}/x.db"
+milvus_path = "{data_dir}/m.db"
+""", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    ns = main_cli.build_parser().parse_args(["bench", "list"])
+    ns.handler(ns)
+    out = capsys.readouterr().out
+    # 三级标签都应出现
+    assert "cwd (editable)" in out
+    assert "home (editable" in out
+    assert "package (read-only" in out
+    # home 下的 myprofile 应被列出
+    assert "myprofile" in out
+    # 包内模板 local 也应被列出
+    assert "local" in out

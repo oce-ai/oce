@@ -193,6 +193,22 @@ class TestValidation:
         with pytest.raises(ProfileError, match="unknown field"):
             load_profile(_write(tmp_path, text))
 
+    def test_llm_tpm_limit_injected_when_set(self, tmp_path):
+        """[llm].tpm_limit 显式给出才注入 LLM_TPM_LIMIT；缺省留给 settings 默认值。"""
+        env = build_env(load_profile(_write(tmp_path, _SQLITE_MIN)), "t", data_dir=tmp_path)
+        assert "LLM_TPM_LIMIT" not in env
+        profile = load_profile(_write(tmp_path, _SQLITE_MIN + "\n[llm]\ntpm_limit = 5000000\n"))
+        env = build_env(profile, "t", data_dir=tmp_path)
+        assert env["LLM_TPM_LIMIT"] == "5000000"
+
+    def test_llm_tpm_limit_zero_allowed_negative_rejected(self, tmp_path):
+        """0 = 不限流合法；负数下界对齐 LLMSettings 的 ge=0，在 profile 解析期早失败。"""
+        profile = load_profile(_write(tmp_path, _SQLITE_MIN + "\n[llm]\ntpm_limit = 0\n"))
+        env = build_env(profile, "t", data_dir=tmp_path)
+        assert env["LLM_TPM_LIMIT"] == "0"
+        with pytest.raises(ProfileError, match="tpm_limit"):
+            load_profile(_write(tmp_path, _SQLITE_MIN + "\n[llm]\ntpm_limit = -1\n"))
+
     def test_sqlite_requires_db_path(self, tmp_path):
         text = """
 [backend]
@@ -326,10 +342,29 @@ class TestIsolationAndApply:
     def test_pipeline_values_become_retrieval_env(self, tmp_path):
         profile = load_profile(_LOCAL)
         env = build_env(profile, "t", data_dir=tmp_path)
+        # 钉住的评测口径键 -> 注入
         assert env["RETRIEVAL_DEFAULT_TOP_K"] == "30"
-        assert env["RETRIEVAL_PATH_INDEX_ENABLED"] == "true"  # bool -> 小写字符串
+        assert env["RETRIEVAL_QUERY_DECOMPOSITION_ENABLED"] == "false"
+        assert env["RETRIEVAL_INTENT_CLASSIFICATION_ENABLED"] == "false"
+        # bool 注入统一小写字符串；worker_concurrency 偏离默认故显式写
+        assert env["WORKER_CONCURRENCY"] == "4"
+        # pipeline 只注入显式键：未写的组件开关不得出现（走 settings 默认）
+        assert "RETRIEVAL_PATH_INDEX_ENABLED" not in env
+        # rerank/llm 段则无条件注入（缺省 false）——与 pipeline 段语义不同
         assert env["RERANK_ENABLED"] == "false"
         assert env["LLM_RERANK_ENABLED"] == "false"
+
+    def test_pipeline_rerank_flag_wins_over_rerank_section(self, tmp_path):
+        """[rerank].enabled 与 [pipeline].rerank_enabled 共写 RERANK_ENABLED，
+        pipeline 段后写覆盖前者——不一致时以 pipeline 为准，测试钉住该语义。"""
+        text = _SQLITE_MIN + """
+[rerank]
+enabled = true
+[pipeline]
+rerank_enabled = false
+"""
+        env = build_env(load_profile(_write(tmp_path, text)), "t", data_dir=tmp_path)
+        assert env["RERANK_ENABLED"] == "false"
 
     def test_load_secrets_env_override_false_respects_real_env(
         self, tmp_path, monkeypatch
@@ -364,4 +399,32 @@ class TestIsolationAndApply:
         finally:
             # 清理本测试注入的键，避免污染同进程后续测试
             for key in injected:
+                os.environ.pop(key, None)
+
+    def test_apply_profile_isolates_from_cwd_dotenv(self, tmp_path, monkeypatch):
+        """apply_profile 关断 cwd .env 污染：profile 未显式给的键不被 cwd .env 泄漏进来。
+
+        回归：build_env 只注入 profile 显式给出的键，其余键 pydantic-settings 会按
+        env_file=[".env", ".env.local"] 从进程 cwd 读文件。在仓库根跑 serve 时，
+        仓库 .env 的 MILVUS_ENDPOINT / EMBED_ENDPOINT 等会被悄悄拾取，覆盖 profile 意图。
+        """
+        sentinel = "http://sentinel-leak:19530"
+        (tmp_path / ".env").write_text(f"MILVUS_ENDPOINT={sentinel}\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("MILVUS_ENDPOINT", raising=False)
+
+        profile = load_profile(_LOCAL)
+        apply_profile(profile, "isolate", data_dir=tmp_path)
+        try:
+            from oce.shared.config.settings import Settings
+            s = Settings()
+            # profile 显式给的 milvus_path 应生效；cwd .env 的 MILVUS_ENDPOINT 应被忽略
+            assert s.milvus.endpoint != sentinel, (
+                f"cwd .env leaked into Settings: {s.milvus.endpoint}"
+            )
+        finally:
+            # 清理：恢复 env_file 配置，避免污染后续测试
+            from oce.shared.config.settings import Settings
+            Settings.model_config["env_file"] = ".env"
+            for key in ("MILVUS_ENDPOINT", "MILVUS_COLLECTION_NAME"):
                 os.environ.pop(key, None)

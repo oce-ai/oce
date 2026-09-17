@@ -14,6 +14,8 @@ prepare_serve_env），脏执行（execute_reset / serve）依赖真后端，留
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -294,3 +296,102 @@ def test_prepare_serve_env_preserves_existing_log_level(tmp_path: Path, monkeypa
     prepare_serve_env(profile, "v1", data_dir=tmp_path / "data")
     # setdefault：用户已设 DEBUG 则尊重，不覆盖成 INFO
     assert os.environ["LOG_LEVEL"] == "DEBUG"
+
+
+# ---------------------------------------------------------------------------
+# import 链不得冻结配置（回归：session.py 曾在 import 期建 engine -> get_settings
+# 的 lru_cache 被 cli 装配链以"注入前"的值填满，profile env 整体失效：local 服务
+# 静默跑在 docker Milvus / .env 远端嵌入端点上）
+# ---------------------------------------------------------------------------
+
+_IMPORT_CHAIN_SNAPSHOT = """
+import sys
+import oce.bench.cli
+from oce.shared.config.settings import get_settings
+from oce.shared.database import session
+
+# 1) bench CLI 的传递 import 链不得读配置 / 建 engine
+assert get_settings.cache_info().currsize == 0, (
+    "get_settings() was called during import of oce.bench.cli: "
+    + repr(get_settings.cache_info())
+)
+assert session._engine is None, "engine built at import time"
+# 2) 显式 getter 首次调用才构造（env 此时指向测试注入的 sqlite），且 memo 同源
+engine = session.get_engine()
+assert engine is session.get_engine(), "engine not memoized"
+assert type(engine).__name__ == "AsyncEngine"
+assert str(engine.url).startswith("sqlite")
+factory = session.get_session_factory()
+assert factory is session.get_session_factory(), "factory not memoized"
+try:
+    session.engine  # 旧 API 已删：import 期建 engine 的路径不复存在
+    raise SystemExit("legacy module-level 'engine' attribute still present")
+except AttributeError:
+    pass
+print("OK")
+"""
+
+
+def test_bench_cli_import_does_not_freeze_settings(tmp_path):
+    """干净子进程复现 serve 时序：先 import cli（此时无 profile env），后注入 env。"""
+    src_root = Path(__file__).resolve().parents[3] / "src"
+    env = {
+        "PYTHONPATH": os.pathsep.join(
+            [str(src_root), *([x] if (x := os.environ.get("PYTHONPATH")) else [])]
+        ),
+        "DB_URL": f"sqlite+aiosqlite:///{(tmp_path / 'oce_bench.db').as_posix()}",
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", _IMPORT_CHAIN_SNAPSHOT],
+        capture_output=True, text=True,
+        env={**os.environ, **env}, timeout=120,
+    )
+    assert done.returncode == 0, f"stdout={done.stdout}\nstderr={done.stderr}"
+    assert "OK" in done.stdout
+
+
+def test_settings_reflect_env_injected_after_cli_import(tmp_path):
+    """serve 核心时序：cli 装配链 import 之后才 prepare_serve_env -> profile 全量生效。
+
+    曾发生的回归：session.py import 期建 engine 冻结 get_settings 缓存，local
+    profile 起的服务静默连上 Milvus server 与 cwd .env 的远端嵌入端点。
+    """
+    profile_path = tmp_path / "local.toml"
+    profile_path.write_text(
+        "[backend]\n"
+        'db_dialect = "sqlite+aiosqlite"\n'
+        'db_path = "{data_dir}/oce_bench.db"\n'
+        'milvus_mode = "lite"\n'
+        'milvus_path = "{data_dir}/oce_bench_milvus.db"\n'
+        "[service]\nworker_enabled = false\n"
+        "[pipeline]\nintent_classification_enabled = false\n",
+        encoding="utf-8",
+    )
+    src_root = Path(__file__).resolve().parents[3] / "src"
+    script = f"""
+import sys
+sys.path.insert(0, {str(src_root)!r})
+import oce.bench.cli  # 先走 cli 装配链（曾在此冻结配置）
+from pathlib import Path
+from oce.bench.profiles import load_profile
+from oce.bench.service import prepare_serve_env
+from oce.shared.config.settings import get_settings
+
+profile = load_profile({str(profile_path)!r})
+prepare_serve_env(profile, "seq", data_dir=Path({str(tmp_path)!r}))
+s = get_settings()
+assert s.milvus.endpoint.replace("\\\\", "/").endswith("oce_bench_milvus.db"), s.milvus.endpoint
+assert not s.milvus.endpoint.startswith("http"), (
+    f"still on default server endpoint: {{s.milvus.endpoint}}"
+)
+assert s.worker.enabled is False
+assert s.retrieval.intent_classification_enabled is False
+print("OK")
+"""
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=120,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert done.returncode == 0, f"stdout={done.stdout}\nstderr={done.stderr}"
+    assert "OK" in done.stdout

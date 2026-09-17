@@ -54,6 +54,36 @@ def default_profiles_dir() -> Path:
     return _DEFAULT_PROFILES_DIR
 
 
+def home_profiles_dir() -> Path:
+    """pip 用户的可写 profile 目录（``~/.oce/bench/profiles/``）。
+
+    ``oce bench init`` 把包内模板落盘到这里，用户可编辑。与个人模式 ``~/.oce/data``
+    同层级，与 bench 数据目录 ``~/.oce/bench-data`` 分离（数据是 sqlite/milvus 文件，
+    profile 是 TOML 配置）。
+    """
+    return Path.home() / ".oce" / "bench" / "profiles"
+
+
+def package_profiles_dir() -> Path:
+    """包内只读模板目录（wheel force-include 的零密钥模板）。
+
+    用作 ``--profile <短名>`` 的最后回落：cwd / home 都没有时，从包内模板兜底。
+    两种安装形态都支持：
+    - wheel 安装：模板在 ``site-packages/oce/bench/profiles/``
+    - editable 安装（``uv run``）：模板在仓库根 ``bench/profiles/``
+    """
+    # wheel 安装：src/oce/bench/profiles/（force-include 映射进包）
+    wheel_dir = Path(__file__).resolve().parent / "profiles"
+    if wheel_dir.is_dir():
+        return wheel_dir
+    # editable 安装：从 __file__ 上溯 4 级到仓库根（src/oce/bench/profiles.py -> bench/）
+    editable_dir = Path(__file__).resolve().parents[3] / "bench" / "profiles"
+    if editable_dir.is_dir():
+        return editable_dir
+    # 兜底：返回 wheel 路径（即使不存在，让调用方报错）
+    return wheel_dir
+
+
 # 密钥字段：profile 中只能用 ``<name>_env`` 引用，出现字面量即拒绝。
 # 这些名字对应 build_env 里会写进 os.environ 的敏感值来源。
 SECRET_FIELDS: frozenset[str] = frozenset({
@@ -203,6 +233,7 @@ class LLM:
     model: str | None = None
     base_url: str | None = None
     api_key: _SecretRef = field(default_factory=_SecretRef)
+    tpm_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -415,11 +446,17 @@ def _load_rerank(section: dict, *, path: Path) -> Rerank:
 
 def _load_llm(section: dict, *, path: Path) -> LLM:
     api_key = _secret_ref(section, "api_key", path=path, table="llm")
+    tpm_limit = section.get("tpm_limit")
+    if tpm_limit is not None:
+        tpm_limit = int(tpm_limit)
+        # 下界与 LLMSettings.tpm_limit 的 ge=0 一致（0=不限流），profile 解析期早失败
+        _require(tpm_limit >= 0, "[llm].tpm_limit must be >= 0 (0 = unlimited)", path=path)
     return LLM(
         rerank_enabled=bool(section.get("rerank_enabled", False)),
         model=section.get("model"),
         base_url=section.get("base_url"),
         api_key=api_key,
+        tpm_limit=tpm_limit,
     )
 
 
@@ -437,6 +474,56 @@ def _load_pipeline(section: dict, *, path: Path) -> Pipeline:
 # ---------------------------------------------------------------------------
 # 密钥分层加载 + env 构建
 # ---------------------------------------------------------------------------
+
+
+def _disable_settings_dotenv() -> None:
+    """关断 pydantic-settings 的 ``.env`` 文件读取，保证 profile 注入不被 cwd 污染。
+
+    各 Settings 类默认 ``env_file=[".env", ".env.local"]``，会从 **进程 cwd** 读文件。
+    在仓库根跑 ``oce bench serve`` 时，仓库 ``.env`` 里的 ``MILVUS_ENDPOINT`` /
+    ``EMBED_ENDPOINT`` / ``RERANK_ENDPOINT`` 等会被悄悄拾取，覆盖 profile 的意图（实测：
+    local profile 起的服务嵌入端点被指到 ``.env`` 里的远端 117.50.83.60:8994，返回 502）。
+
+    类定义后改写 ``model_config["env_file"]`` 即可关闭文件读取，不影响：
+    - 真实环境变量（pydantic-settings 最高优先级，始终生效）
+    - ``load_dotenv`` 直接写入 os.environ 的路径（secrets.env / 个人 .env）
+    - profile 显式注入的键（``build_env`` 返回的 dict 经 ``os.environ.update`` 覆盖）
+
+    副作用：``oce bench serve`` 之后，cwd 的 ``.env`` 对 Settings 类完全失效——
+    这正是"隔离"语义。
+    """
+    from oce.shared.config.settings import (
+        ChunkingSettings,
+        DatabaseSettings,
+        EmbeddingSettings,
+        LLMSettings,
+        LogSettings,
+        MilvusSettings,
+        MonitoringSettings,
+        RedisSettings,
+        RetrievalSettings,
+        RerankSettings,
+        Settings,
+        WorkerSettings,
+    )
+
+    for cls in (
+        Settings,
+        DatabaseSettings,
+        MilvusSettings,
+        EmbeddingSettings,
+        RerankSettings,
+        LLMSettings,
+        ChunkingSettings,
+        RetrievalSettings,
+        RedisSettings,
+        WorkerSettings,
+        LogSettings,
+        MonitoringSettings,
+    ):
+        cfg = dict(cls.model_config)
+        cfg["env_file"] = None
+        cls.model_config = cfg  # type: ignore[assignment]
 
 
 def load_secrets_env(profiles_dir: Path) -> Path | None:
@@ -577,6 +664,8 @@ def build_env(
         env["LLM_MODEL"] = profile.llm.model
     if profile.llm.base_url:
         env["LLM_BASE_URL"] = profile.llm.base_url
+    if profile.llm.tpm_limit is not None:
+        env["LLM_TPM_LIMIT"] = str(profile.llm.tpm_limit)
     llm_key = profile.llm.api_key.resolve(env_name="[llm].api_key_env")
     if llm_key is not None:
         env["LLM_API_KEY"] = llm_key
@@ -608,12 +697,14 @@ def apply_profile(
     1. secrets.env（override=False，真实 env 优先）
     2. 个人 <data_dir>/.env（override=False，填 profile 未涉及的键）
     3. build_env 结果（override=True，profile 对 bench 基础设施是权威）
+    4. 关断 pydantic-settings 的 ``.env`` 文件读取（防止 cwd `.env` 污染）
     """
     if profile.source_path is not None:
         load_secrets_env(profile.source_path.parent)
     _load_personal_env(data_dir, env_file)
     env = build_env(profile, tag, data_dir=data_dir)
     os.environ.update(env)  # profile 权威：覆盖任何残留的同名 bench 变量
+    _disable_settings_dotenv()  # 关断 cwd .env 污染
     return env
 
 

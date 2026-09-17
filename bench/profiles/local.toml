@@ -7,53 +7,34 @@
 # worker 关闭 -> batch_upload 同步嵌入（service.batch_upload 见 background_indexing
 # 为假时内联 EmbedPendingCommand），因此无需 Redis / Postgres / 后台 worker。
 #
-# 本文件不含任何密钥字段：EMBED_API_KEY 等留空即回落到 oce 自带默认值或
-# <data-dir>/.env（`oce init` 生成）。要连真实嵌入服务时在此填 [embedding].endpoint /
-# model / dimensions，密钥仍走 <data-dir>/.env 或环境变量，勿写进本文件。
+# 【只写与默认值不同的键】sqlite+aiosqlite / milvus lite / 127.0.0.1:8987 /
+# worker 关 / 嵌入端点 http://127.0.0.1:8994/v1/embeddings f2llm-v2-0.6b 1024 维等
+# 全部是 dataclass 默认（见 profiles.py），不写即隐式注入。serve 关断 cwd .env
+# （见 apply_profile -> _disable_settings_dotenv），凭据只从 secrets.env / 真实 env
+# 进来；本文件零密钥字段，嵌入 key 缺省回落 settings 默认 sk-oce-llama-server。
+#
+# 【pipeline 段是唯一例外】：只注入写出的键，未写键走 settings.py 默认。
+# 评测口径参数（top_k / final_select_k / rrf_k）显式钉住——跨版本默认值漂移不得
+# 悄悄改变分数可比性；组件开关只钉与 settings 默认不同的（意图分类/查询分解默认开）。
 
 [backend]
-db_dialect = "sqlite+aiosqlite"
 db_path = "{data_dir}/oce_bench.db"
-milvus_mode = "lite"
 milvus_path = "{data_dir}/oce_bench_milvus.db"
 
 [isolation]
-redis_db = 0
 collection_prefix = "bench_local"
 queue_template = "oce:bench_local_{tag}"
 
 [service]
-host = "127.0.0.1"
-port = 8987
-worker_enabled = false          # 同步嵌入，无需 Redis
 worker_concurrency = 4
-monitoring_enabled = true
-monitoring_store_query_text = false
 
 [embedding]
-enabled = true
-model = "f2llm-v2-0.6b"
-endpoint = "http://127.0.0.1:8994/v1/embeddings"
-dimensions = 1024
 max_concurrency = 4
 max_batch_size = 32
-timeout_seconds = 900.0
 
-[rerank]
-enabled = false                 # 本地默认关重排（无 rerank 服务）
-
-[llm]
-rerank_enabled = false          # 本地默认关 LLM 语义重排
-
-# L0 检索默认值（运行期可用 `oce bench reconfigure` 或 sweep 热改）。
-# 与 serve_bench 的"确定性 pipeline"一致：dense + exact + path + RRF，LLM 层关。
 [pipeline]
 default_top_k = 30
 final_select_k = 10
 rrf_k = 60
-path_index_enabled = true
-query_rewrite_enabled = false
 query_decomposition_enabled = false
 intent_classification_enabled = false
-rerank_enabled = false
-llm_rerank_enabled = false

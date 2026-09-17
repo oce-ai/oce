@@ -1,11 +1,13 @@
-"""``oce bench`` 子命令：一条命令链完成评测（list/serve/run/sweep/reconfigure/compare/reset）。
+"""``oce bench`` 子命令：一条命令链完成评测（init/list/serve/run/sweep/reconfigure/compare/reset）。
 
 取代散落在 scratch 的 bench_orchestrate / serve_bench / reset_bench 三脚本，且：
 - 无硬编码绝对路径（数据集从包内发现、被测仓库按 --repo-root/env/同级约定解析）。
 - 无明文密码（profile 的 ``*_env`` 引用 + secrets.env，见 profiles.py）。
 - 改参数秒级生效不重启（reconfigure/sweep 走 L0 热改端点，read-after-write 保证）。
+- pip 用户友好：``oce bench init`` 落盘模板，``--profile local`` 装完即用。
 
-命令分两类：
+命令分三类：
+- **脚手架**：``init``（把包内模板落盘到 ``~/.oce/bench/profiles/``）。
 - **服务侧**（起/清隔离服务，需 import app、灌 env）：``serve`` / ``reset``。
 - **客户端侧**（连已运行的服务，纯 httpx）：``run`` / ``sweep`` / ``reconfigure`` /
   ``compare`` / ``list``。典型流程：先 ``serve`` 起服务（长驻），另开终端 ``run``/``sweep``
@@ -43,7 +45,9 @@ from oce.bench.profiles import (
     Profile,
     ProfileError,
     default_profiles_dir,
+    home_profiles_dir,
     load_profile,
+    package_profiles_dir,
 )
 from oce.bench.report import render_record, write_report
 from oce.bench.resources import build_meter
@@ -98,18 +102,36 @@ def _guard(handler: Callable[[argparse.Namespace], None]):
 
 
 def _resolve_profile(name_or_path: str) -> Profile:
-    """``--profile`` 取值：先当路径，再当 bench/profiles/<name>.toml 的短名。"""
+    """``--profile`` 取值：先当路径，再按短名在三级目录查找。
+
+    查找顺序（先命中即返回）：
+    1. 绝对/相对路径（``Path(name_or_path)`` 是文件）
+    2. cwd 下 ``bench/profiles/<name>.toml``（checkout 工作流）
+    3. ``~/.oce/bench/profiles/<name>.toml``（pip 用户 ``oce bench init`` 落盘后编辑）
+    4. 包内模板 ``oce/bench/profiles/<name>.toml``（force-include 的零密钥模板，装完即用）
+
+    每档都尝试 ``<name>.toml`` 与 ``<name>.example.toml`` 两种后缀。
+    """
     candidate = Path(name_or_path)
     if candidate.is_file():
         return load_profile(candidate)
-    short = default_profiles_dir() / f"{name_or_path}.toml"
-    if short.is_file():
-        return load_profile(short)
-    example = default_profiles_dir() / f"{name_or_path}.example.toml"
-    if example.is_file():
-        return load_profile(example)
+
+    search_dirs = [
+        default_profiles_dir(),
+        home_profiles_dir(),
+        package_profiles_dir(),
+    ]
+    for directory in search_dirs:
+        short = directory / f"{name_or_path}.toml"
+        if short.is_file():
+            return load_profile(short)
+        example = directory / f"{name_or_path}.example.toml"
+        if example.is_file():
+            return load_profile(example)
+
     raise BenchCLIError(
-        f"profile '{name_or_path}' not found (tried {candidate}, {short}, {example})"
+        f"profile '{name_or_path}' not found (tried {candidate}, "
+        f"{', '.join(str(d) for d in search_dirs)})"
     )
 
 
@@ -209,6 +231,74 @@ def _log(message: str) -> None:
     print(message, flush=True)
 
 
+def _is_sweep_matrix(path: Path) -> bool:
+    """判断 TOML 文件是否是 sweep 矩阵（包含 [[set]]）而非 profile。"""
+    try:
+        import tomllib
+
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+        return "set" in data and isinstance(data.get("set"), list)
+    except Exception:
+        # 解析失败或不是有效 TOML，保守地认为是 profile
+        return False
+
+
+# ---------------------------------------------------------------------------
+# init（把包内模板落盘到 ~/.oce/bench/profiles/）
+# ---------------------------------------------------------------------------
+
+
+# 随包模板：只打包零密钥的。docker.example.toml 含 `*_env` 引用但无明文，安全落盘。
+# docker.toml / secrets.env 是用户改过的，绝不覆盖。
+_BUNDLED_TEMPLATES = (
+    "local.toml",
+    "docker.example.toml",
+    "sweep_topk.example.toml",
+)
+
+
+def _cmd_init(args: argparse.Namespace) -> None:
+    """把包内 profile 模板落盘到 ``~/.oce/bench/profiles/``（pip 用户起步）。
+
+    与 ``oce init`` 对称：``oce init`` 落 ``~/.oce/data/.env``（个人模式配置），
+    ``oce bench init`` 落 ``~/.oce/bench/profiles/*.toml``（评测 profile）。
+    已存在的同名文件默认跳过（``--force`` 覆盖）。
+    """
+    target_dir = home_profiles_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    source_dir = package_profiles_dir()
+    if not source_dir.is_dir():
+        raise BenchCLIError(
+            f"package templates not found: {source_dir} (corrupted installation?)"
+        )
+
+    written: list[str] = []
+    skipped: list[str] = []
+    for name in _BUNDLED_TEMPLATES:
+        src = source_dir / name
+        if not src.is_file():
+            skipped.append(f"{name} (missing from package)")
+            continue
+        dst = target_dir / name
+        if dst.exists() and not args.force:
+            skipped.append(name)
+            continue
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        written.append(name)
+
+    print(f"Profile directory: {target_dir}")
+    if written:
+        print(f"  Written: {', '.join(written)}")
+    if skipped:
+        print(f"  Skipped (already exist): {', '.join(skipped)}")
+    if not written and not skipped:
+        print("  (nothing to do)")
+    if written:
+        print("\nNext: edit ~/.oce/bench/profiles/local.toml if needed, then `oce bench serve --profile local`.")
+
+
 # ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
@@ -226,16 +316,28 @@ def _cmd_list(args: argparse.Namespace) -> None:
                 f"pinned={commit[:10]} {ds.repository.describe})"
             )
     else:
-        print("  (none found; expected *.jsonl in src/oce/bench/datasets/)")
+        print("  (none found; expected *.jsonl in bench/datasets/)")
 
+    # profile 三级查找：cwd > home > 包内。每级独立列出，让用户知道哪些可编辑、哪些是只读兜底。
     print("\nProfiles:")
-    profiles_dir = default_profiles_dir()
-    tomls = sorted(profiles_dir.glob("*.toml")) if profiles_dir.is_dir() else []
-    if tomls:
+    tiers = [
+        ("cwd (editable)", default_profiles_dir()),
+        ("home (editable, `oce bench init`)", home_profiles_dir()),
+        ("package (read-only templates)", package_profiles_dir()),
+    ]
+    any_profile = False
+    for label, directory in tiers:
+        tomls = sorted(directory.glob("*.toml")) if directory.is_dir() else []
+        # 过滤掉 sweep 矩阵文件
+        tomls = [p for p in tomls if not _is_sweep_matrix(p)]
+        if not tomls:
+            continue
+        any_profile = True
+        print(f"  [{label}] {directory}")
         for path in tomls:
-            print(f"  {path.stem}  ({path})")
-    else:
-        print(f"  (none in {profiles_dir})")
+            print(f"    {path.stem}  ({path})")
+    if not any_profile:
+        print("  (none; run `oce bench init` to scaffold)")
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +623,15 @@ def build_bench_commands(bench_sub: argparse._SubParsersAction) -> None:
     # --- list ---
     p_list = bench_sub.add_parser("list", help="List datasets and profiles")
     p_list.set_defaults(handler=_guard(_cmd_list))
+
+    # --- init ---
+    p_init = bench_sub.add_parser(
+        "init", help="Scaffold profile templates in ~/.oce/bench/profiles/",
+    )
+    p_init.add_argument(
+        "--force", action="store_true", help="Overwrite existing templates in home dir",
+    )
+    p_init.set_defaults(handler=_guard(_cmd_init))
 
     # --- serve ---
     p_serve = bench_sub.add_parser("serve", help="Start an isolated bench service")

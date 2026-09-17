@@ -76,8 +76,13 @@ class _FakePathIndex:
 
 
 def _settings(**retrieval_overrides) -> Settings:
-    """一份 live Settings 快照；retrieval 组按需覆盖，LLM 全关、intent 关。"""
+    """一份 live Settings 快照；retrieval 组按需覆盖，LLM 全关、intent 关。
+
+    default_top_k 显式钉 50 作为"改动前基线"：本文件多处断言失败路径下它保持不变，
+    不该随 RetrievalSettings 的全局默认值漂移。
+    """
     retrieval_overrides.setdefault("intent_classification_enabled", False)
+    retrieval_overrides.setdefault("default_top_k", 50)
     base = Settings(
         llm=LLMSettings(
             rerank_enabled=False, api_key="k", model="m", base_url="http://x"

@@ -109,7 +109,7 @@ from oce.infrastructure.metrics.stats_store import SqlMonitoringStatsReader
 from oce.infrastructure.metrics.report_store import SqlReportsReader
 from oce.infrastructure.queue.redis_queue import RedisQueue
 from oce.shared.config import get_settings
-from oce.shared.database.session import async_session_factory
+from oce.shared.database.session import get_session_factory
 from oce.shared.logging import DATA_DIR_ENV
 from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
 from oce.shared.reports_read import VectorCollectionStat, VectorStoreStat
@@ -155,6 +155,8 @@ class _CredentialRuntime:
 class Container:
     def __init__(self) -> None:
         settings = get_settings()
+        # 首次装配才建 engine/工厂（惰性，见 session.py 模块注释）；装配后复用同一实例。
+        async_session_factory = get_session_factory()
         if settings.embedding.dimensions != settings.milvus.dense_dim:
             raise ValueError("EMBED_DIMENSIONS must equal MILVUS_DENSE_DIM")
 

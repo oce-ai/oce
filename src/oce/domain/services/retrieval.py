@@ -648,11 +648,11 @@ class RetrievalPipeline:
         # 使用一个虚拟查询来获取这些 blob 的内容
         # 这里我们需要直接访问数据库，因为 SearchStore 不提供按 blob_name 查询的接口
         from oce.infrastructure.persistence.models import BlobChunkModel, BlobModel, ChunkModel
-        from oce.shared.database.session import async_session_factory
+        from oce.shared.database.session import get_session_factory
         from sqlalchemy import select
 
         try:
-            async with async_session_factory() as session:
+            async with get_session_factory()() as session:
                 # 为每个 blob 获取第一个 chunk
                 for blob_name in blob_names:
                     stmt = (

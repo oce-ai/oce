@@ -15,7 +15,7 @@ from oce.api.middleware import ApiCallMetricsMiddleware
 from oce.api.router import router
 from oce.application.container import get_container
 from oce.shared.config.settings import get_settings
-from oce.shared.database.session import engine
+from oce.shared.database.session import get_engine
 from oce.shared.logging import DATA_DIR_ENV, LOG_LEVEL_ENV, configure_logging
 
 
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     # 关闭时停止 worker + 清理资源
     if get_container.cache_info().currsize:
         await get_container().close()
-    await engine.dispose()
+    await get_engine().dispose()
 
 
 app = FastAPI(

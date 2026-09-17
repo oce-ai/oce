@@ -6,8 +6,6 @@
 
 **自托管、ACE 兼容的代码检索服务，为 AI 编码代理提供精准上下文。**
 
-dense + exact + path 混合召回 · cAST 语义切块 · LLM 重排 · 覆盖度感知选择
-
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/oce-ai/oce/ci.yml?branch=master&logo=github&label=CI)](https://github.com/oce-ai/oce/actions/workflows/ci.yml)
@@ -21,186 +19,107 @@ dense + exact + path 混合召回 · cAST 语义切块 · LLM 重排 · 覆盖�
 
 </div>
 
-OpenContextEngine 是一个自托管、ACE 兼容的代码检索服务。它用 cAST 语义切块索引源码，
-把元数据存入 PostgreSQL 或 SQLite，在 Milvus 3.0 中做 dense 向量检索，并在覆盖度感知的
-最终选择之前用 LLM 对结果重排。
+OpenContextEngine（OCE）让 AI 编码代理获取准确、实时的代码库上下文。它用 cAST 语义切块
+索引源码，以 dense + exact + path 混合召回检索，经 LLM 重排后做覆盖度感知的最终选择——
+全部封装在一套你自己托管的 ACE 兼容 HTTP API 之后。
 
-它提供两种部署模式：零依赖的**个人模式**（SQLite + 内嵌 Milvus Lite，后台 worker 关闭），
-面向单机；以及**服务模式**（PostgreSQL + Milvus 3.0 + Redis），面向共享、更高吞吐的部署。
+- **服务端**（本仓库）：<https://github.com/oce-ai/oce>
+- **客户端**：<https://github.com/oce-ai/oce-client> —— 工作区同步、检索 CLI 与 MCP server
 
-项目完全开源，服务端和客户端分别维护：
+## 目录
 
-- 服务端：<https://github.com/oce-ai/oce>
-- 客户端：<https://github.com/oce-ai/oce-client>
-
-这是此前 ACE 服务的重构版本，相关背景和早期实现见
-[linux.do 讨论](https://linux.do/t/topic/2308140/125)。
-
-如果你只想在本机给 AI 编码工具提供代码上下文，直接使用个人模式即可；如果需要让多台
-机器或多个用户共享同一套索引，再部署服务模式并配合 `opencontextengine-client`。
-
-## 特性
-
-- **混合检索** —— 并发的 dense 语义召回（Milvus 3.0）、exact 精确标识符查找（`symbol_occurrences`）与独立路径索引，用加权 rank fusion 融合。
-- **cAST 语义切块** —— 基于 tree-sitter 沿语义边界切分源码，而非机械的行窗口。
-- **LLM 重排 + 覆盖度感知选择** —— 基础重排、可选 LLM 重排，再用贪心 bin-packing 优先保证仓库覆盖度、抑制重叠片段、限制每路径 chunk 数，并遵守硬字符预算。
-- **两种部署模式** —— 零依赖个人模式（SQLite + 内嵌 Milvus Lite）面向单机；服务模式（PostgreSQL + Milvus 3.0 + Redis）面向共享与更高吞吐。
-- **ACE 兼容 API** —— 面向 ACE 客户端的 `/agents/*` 接口，Bearer 鉴权保护。
-- **清晰的 DDD/CQRS 架构** —— 依赖向内收敛；infrastructure 只由 composition root 装配，业务逻辑保持可测。
-- **运维 admin API + 监控** —— 独立 admin key 的接口面管理模型凭据、嵌入队列与垃圾回收；旁路 metrics 管线记录调用/token/资源指标与检索各阶段审计。
-- **可复现的评测框架** —— 内置 `oce bench` 命令链用 Top-1 + nDCG@10 在真实仓库上衡量检索质量；一次索引扫 N 组参数，支持 L0 热改秒级切换。详见[评测框架](#评测框架)。
-
-<details>
-<summary><strong>目录</strong></summary>
-
-- [特性](#特性)
-- [环境要求](#环境要求)
-- [个人模式](#个人模式)
+- [选择部署模式](#选择部署模式)
+- [快速开始（个人模式）](#快速开始个人模式)
+- [接入 AI 工具（客户端与 MCP）](#接入-ai-工具客户端与-mcp)
 - [服务模式](#服务模式)
-- [客户端与 MCP](#客户端与-mcp)
+- [特性](#特性)
 - [API](#api)
 - [架构](#架构)
-  - [检索管线](#检索管线)
 - [评测框架](#评测框架)
-- [测试](#测试)
+- [开发](#开发)
 - [许可](#许可)
 
-</details>
+## 选择部署模式
 
-## 环境要求
+OCE 提供两种部署模式。除非你明确需要多用户/多机器共享同一套索引，否则从个人模式开始。
 
-- Python 3.11 及以上
-- [uv](https://docs.astral.sh/uv/)
+| | **个人模式** | **服务模式** |
+| --- | --- | --- |
+| 面向 | 单机单用户 | 共享索引、多用户/多机器 |
+| 存储 | SQLite + 内嵌 Milvus Lite | PostgreSQL 16 + Milvus 3.0 + Redis |
+| 外部依赖 | **无** | 由 Docker Compose 提供 |
+| 安装 | `uv tool install opencontextengine` | `docker compose up -d` |
+| 后台 worker | 关闭（同步嵌入） | 开启（Redis 队列） |
 
-个人模式无需其它依赖：元数据落在 SQLite，向量落在内嵌的 Milvus Lite 文件。服务模式额外
-需要 PostgreSQL 16、Milvus 3.0 和 Redis；其开发用编排见 `docker-compose.dev.yml`。
+两种模式都只需要你自备一样东西：一个 **OpenAI 兼容的嵌入服务**——托管供应商的 key，
+或本地推理服务（如 llama-server）均可。
 
-## 个人模式
+## 快速开始（个人模式）
 
-个人模式适合本机使用，不需要单独部署 PostgreSQL、Milvus 或 Redis。安装 CLI、生成配置、
-填好嵌入 key，然后启动：
+需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。无需部署任何数据库或向量库——
+所有数据都在 `~/.oce/data`。
+
+**1. 安装并初始化**
 
 ```powershell
 uv tool install opencontextengine
 oce init                    # 生成 ~/.oce/data/.env
 ```
 
-编辑 `~/.oce/data/.env`。嵌入服务是建库和检索所需的唯一必填项；默认配置使用 SiliconFlow
-和 Qwen3-Embedding-4B（输出 1024 维向量）：
+**2. 配置嵌入服务** —— 编辑 `~/.oce/data/.env`。默认指向本地 `127.0.0.1:8994` 的
+OpenAI 兼容服务（嵌入 + 重排），如果你跑了一个就无需改动。改用托管供应商时
+（以 SiliconFlow 为例）：
 
 ```dotenv
 EMBED_API_KEY=你的嵌入服务密钥
-# 以下两项已有默认值，只有更换供应商或模型时才需要修改
 EMBED_ENDPOINT=https://api.siliconflow.cn/v1/embeddings
 EMBED_MODEL=Qwen/Qwen3-Embedding-4B
+EMBED_DIMENSIONS=1024
+RERANK_ENABLED=false        # 供应商提供 /rerank 端点时才保持 true
 ```
 
-推荐再配置一个 OpenAI 兼容的轻量 LLM，用于意图识别和语义精排。模型名和 endpoint 请以
-你使用的供应商为准，例如 `qwen3.7-flash`；追求速度时也可以选择供应商提供的更快模型：
+**3.（推荐）配置一个轻量 LLM。** 意图分类默认开启且使用此客户端；任意 OpenAI 兼容的
+低延迟模型均可：
 
 ```dotenv
 LLM_API_KEY=你的 LLM 服务密钥
-LLM_BASE_URL=https://provider.example.com/v1
-LLM_MODEL=qwen3.7-flash
-RERANK_ENABLED=false
+LLM_BASE_URL=https://api.siliconflow.cn/v1
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
-如果暂时不配置 LLM，请同时关闭 LLM 重排和意图分类：
+不配置 LLM key 时，每次查询会静默回退到启发式意图分类；设
+`RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false` 可完全跳过尝试。LLM 重排和查询改写
+默认关闭。
 
-```dotenv
-LLM_RERANK_ENABLED=false
-RETRIEVAL_INTENT_CLASSIFICATION_ENABLED=false
-```
-
-然后启动服务：
+**4. 启动服务**
 
 ```powershell
 oce serve                   # http://127.0.0.1:8986
 ```
 
-个人模式默认只监听 `127.0.0.1`，并预填客户端约定的 `API_KEY=sk-opencontextengine`。如果
-要监听局域网或公网地址，请改用强随机 `API_KEY`，并在客户端同步设置 `OCE_API_KEY`。
+搞定。数据库迁移、SQLite 和内嵌 Milvus Lite 文件都会在启动时自动准备好。下一步：
+[接入你的 AI 工具](#接入-ai-工具客户端与-mcp)。
 
-`oce serve` 启动时会自动执行数据库迁移（Alembic），然后准备好 SQLite、内嵌 Milvus Lite
-文件和一个关闭的后台 worker，因此 `oce init` 只暴露你真正要填的少量 key。生成的 `.env`
-放在 data 目录，每次启动自动加载。常用参数：
+<details>
+<summary><strong>CLI 参数、安全提示与小技巧</strong></summary>
 
 - `--data-dir <path>` —— 数据库、向量文件和 `.env` 的存放位置（默认 `~/.oce/data`）
 - `--env-file <path>` —— 改为加载指定的 `.env`（优先级最高）
 - `--port <n>` / `--host <addr>` —— 监听地址（默认 `127.0.0.1:8986`）
+- `oce version`（或 `oce --version`）打印版本；`-v` 把日志提到 INFO，`-vv` 到 DEBUG（默认 WARNING）
+- 不安装临时试跑：`uvx --from opencontextengine oce serve`
 
-`oce version`（或 `oce --version`）打印当前版本；`oce -v serve` 把日志级别提到 INFO，
-`-vv` 提到 DEBUG（默认 WARNING，让检索管线的 info 日志保持安静）。
+个人模式默认只监听 `127.0.0.1`，并预填客户端约定的 `API_KEY=sk-opencontextengine`。
+如果要监听局域网或公网地址，请改用强随机 key，并在客户端同步设置 `OCE_API_KEY`。
 
-想临时试跑而不安装：`uvx --from opencontextengine oce serve`。
+</details>
 
-## 服务模式
+## 接入 AI 工具（客户端与 MCP）
 
-服务模式面向多人或多台机器共享索引，由 PostgreSQL、Milvus 3.0 和 Redis 支撑。推荐使用
-仓库自带的 Docker Compose：
+客户端负责扫描本地工作区、上传变更，并从服务端检索代码上下文。它是独立发布的包，
+详见 <https://github.com/oce-ai/oce-client>。
 
-```powershell
-git clone https://github.com/oce-ai/oce.git
-Set-Location oce
-Copy-Item .env.example .env
-# 编辑 .env：至少设置 API_KEY、ADMIN_API_KEY、EMBED_API_KEY；按需设置 LLM_API_KEY
-docker compose up -d
-```
-
-根目录的 `docker-compose.yml` 会一起启动 OCE、PostgreSQL、Redis 和 Milvus 依赖，应用容器
-启动时自动执行迁移。服务模式务必把 `API_KEY` 和 `ADMIN_API_KEY` 换成强随机值，并在 `.env`
-中设置 Compose 使用的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD`；不要把真实密钥提交到仓库。
-开发环境若只想启动依赖、在宿主机运行应用，可使用 `docker-compose.dev.yml`，但要先把
-`.env` 中的 `DB_URL`、`REDIS_URL` 改为该文件映射到宿主机的端口，再执行
-`uv run alembic upgrade head` 和 `uv run uvicorn`。
-
-也可以直接使用已经发布的镜像：
-
-```powershell
-docker pull ghcr.io/oce-ai/oce:latest
-```
-
-在自己的 Compose、Kubernetes 或其它编排文件中，将应用服务镜像设为
-`ghcr.io/oce-ai/oce:latest`，并提供下面三个服务连接配置：`DB_URL`、`REDIS_URL` 和
-`MILVUS_ENDPOINT`。镜像入口默认监听容器内的 `8986` 端口。
-
-### Admin 管理面板
-
-服务启动后可使用官方在线面板：<https://oce-ai.github.io/oce-admin>。
-
-1. 在服务端设置独立的 `ADMIN_API_KEY`（不设置时会回落到 `API_KEY`）。
-2. 在面板中填写服务地址和 admin key。
-3. 通过面板管理模型凭据、队列、垃圾回收和监控指标。
-
-admin key 只保存在浏览器本地存储中，不要写入 URL、仓库或日志。自定义面板域名时，用
-`CORS_ORIGINS` 配置允许的来源。
-
-模型客户端从单张 `model_credentials` 表按 `kind`（`embed`、`rerank`、`llm_rerank`、
-`query_rewrite`、`intent`）解析凭据：取 status=active 中 `priority` 数字最小的一行。某个
-kind 没有匹配的启用行时，对应客户端回退到各自的环境变量（`EMBED_*`、`RERANK_*`、`LLM_*`；
-重排还会复用嵌入 key）。通过 `/admin/credentials` API 管理这些行，再调
-`POST /admin/credentials/reload` 即可在不重启服务的情况下热重载所有客户端。
-
-SiliconFlow 单次嵌入请求的 `input` 数组最多接受 32,000 字符。`max_batch_size` 和
-`max_batch_chars` 是每个凭据可覆盖的 provider 默认值。超过 `max_input_chars` 的输入会在
-文本边界带重叠地切分、分别嵌入，再按长度加权、池化并归一化成一个 chunk 向量。这种模型
-特定的分段不会改变领域层的 chunk 边界。
-
-包含多个明确句子或列表项的仓库级请求，会被分解成一个完整查询加若干有界 facet 查询。每个
-查询独立召回候选；结果用加权 rank fusion（`RETRIEVAL_RRF_K` 可调）融合后再重排。单查询
-模式用 `RETRIEVAL_DEFAULT_TOP_K`，多查询模式每个查询用 `RETRIEVAL_PER_QUERY_TOP_K` 控制
-候选池大小。最终选择采用贪心 bin-packing 策略，优先保证仓库覆盖度（两遍：先确保每个文件
-都有代表，再用剩余预算补齐），抑制文件内重叠片段，限制每个路径的 chunk 数，并遵守硬字符
-预算。设 `RETRIEVAL_QUERY_DECOMPOSITION_ENABLED=false` 可关闭分解，回到经典单查询 Top-K。
-
-上传准入会在切块前拒绝依赖/构建/缓存目录、含 NUL 的文件，以及 SVG、媒体、压缩包、压缩
-打包产物、source map、lock 文件等非源码产物。被跳过的路径会作为空的 ready blob 持久化，
-避免客户端反复重传。项目清单和测试固件有显式豁免。
-
-## 客户端与 MCP
-
-客户端负责扫描本地工作区、上传变更、维护 checkpoint，并调用服务端检索当前代码。它是
-独立发布的包，详见 <https://github.com/oce-ai/oce-client>：
+**CLI 用法：**
 
 ```powershell
 uv tool install opencontextengine-client
@@ -213,7 +132,7 @@ oce-client sync
 oce-client retrieve "Where is request authentication implemented?"
 ```
 
-需要接入支持 MCP 的 AI 编码工具时，安装 MCP extra 并启动 stdio server：
+**MCP（接入 AI 编码工具）**：安装 MCP extra 并启动 stdio server：
 
 ```powershell
 uv tool install "opencontextengine-client[mcp]"
@@ -221,10 +140,95 @@ oce-client-mcp --workspace C:\path\to\workspace
 ```
 
 `oce-client-mcp` 会在后台建立初始索引、监听工作区变化，并把 `codebase-retrieval` 暴露为
-MCP 工具。多个工作区可重复传入 `--workspace`；此时工具调用必须指定对应的
-`workspace_folder`。API 地址、密钥和工作区也可以通过 `OCE_API_URL`、`OCE_API_KEY`、
-`OCE_WORKSPACE`/`OCE_WORKSPACES` 配置。请将密钥放在环境变量或 secret manager 中，不要写进
-MCP 配置文件。
+MCP 工具。多个工作区可重复传入 `--workspace`（此时工具调用必须指定对应的
+`workspace_folder`）。`OCE_API_URL`、`OCE_API_KEY`、`OCE_WORKSPACE`/`OCE_WORKSPACES`
+是等价的环境变量配置。请把密钥放在环境变量或 secret manager 中，不要写进 MCP 配置文件。
+
+## 服务模式
+
+面向多用户或多台机器共享同一套索引，由 PostgreSQL、Milvus 3.0 和 Redis 支撑——仓库自带的
+Docker Compose 会把它们一起拉起：
+
+```powershell
+git clone https://github.com/oce-ai/oce.git
+Set-Location oce
+Copy-Item .env.example .env
+# 编辑 .env：至少设置 API_KEY、ADMIN_API_KEY、EMBED_API_KEY；按需设置 LLM_API_KEY
+docker compose up -d
+```
+
+应用容器启动时自动执行数据库迁移。服务模式务必把 `API_KEY` 和 `ADMIN_API_KEY` 换成强随机
+值，并设置 Compose 使用的 `POSTGRES_PASSWORD` / `REDIS_PASSWORD`。不要把真实密钥提交到
+仓库。
+
+**预构建镜像**：在自己的 Compose/Kubernetes 中，将应用镜像设为
+`ghcr.io/oce-ai/oce:latest`，并提供 `DB_URL`、`REDIS_URL` 和 `MILVUS_ENDPOINT`。
+容器内监听 `8986` 端口。
+
+<details>
+<summary><strong>开发环境（依赖跑 Docker，应用跑宿主机）</strong></summary>
+
+`docker-compose.dev.yml` 只启动依赖，PostgreSQL 映射到 `25432`、Redis 到 `26379`、
+Milvus 到 `19530`。把 `DB_URL`、`REDIS_URL` 指向这些宿主机端口，然后：
+
+```powershell
+uv sync --extra dev
+uv run alembic upgrade head
+uv run uvicorn oce.main:app --reload --port 8986
+```
+
+</details>
+
+### Admin 管理面板
+
+服务启动后可用官方在线面板 <https://oce-ai.github.io/oce-admin> 管理运行中的服务：
+
+1. 在服务端设置独立的 `ADMIN_API_KEY`（不设置时回落到 `API_KEY`）。
+2. 在面板中填写服务地址和 admin key。
+3. 管理模型凭据、嵌入队列、垃圾回收和监控指标。
+
+admin key 只保存在浏览器本地存储中——不要写入 URL、仓库或日志。面板部署在自定义域名时，
+用 `CORS_ORIGINS` 放行其来源。
+
+### 模型凭据
+
+模型客户端从 `model_credentials` 表按 `kind`（`embed`、`rerank`、`llm_rerank`、
+`query_rewrite`、`intent`）解析凭据：取启用行中 `priority` 数字最小的一条。某个 kind 没有
+匹配的启用行时，对应客户端回退到各自的环境变量（`EMBED_*`、`RERANK_*`、`LLM_*`；重排还会
+复用嵌入 key）。通过 `/admin/credentials` API 管理这些行，再调
+`POST /admin/credentials/reload` 即可不重启热重载所有客户端。
+
+## 特性
+
+- **混合检索** —— 并发的 dense 语义召回（Milvus 3.0）、exact 精确标识符查找（`symbol_occurrences`）与独立路径索引，用加权 rank fusion 融合。
+- **cAST 语义切块** —— 基于 tree-sitter 沿语义边界切分源码，而非机械的行窗口。
+- **LLM 重排 + 覆盖度感知选择** —— 基础重排、可选 LLM 重排，再用贪心 bin-packing 优先保证仓库覆盖度、抑制重叠片段、限制每路径 chunk 数，并遵守硬字符预算。
+- **查询分解** —— 多面请求拆成一个完整查询加若干有界 facet 查询，各自独立召回后融合再重排。
+- **ACE 兼容 API** —— 面向 ACE 客户端的 `/agents/*` 接口，Bearer 鉴权保护。
+- **两种部署模式** —— 零依赖个人模式，或 PostgreSQL/Milvus/Redis 服务模式。
+- **运维 admin API + 监控** —— admin key 独立鉴权的凭据/队列/GC 管理，加旁路 metrics 管线记录调用/token/资源指标与检索各阶段审计。
+- **可复现的评测框架** —— 内置 `oce bench` 用 Top-1 + nDCG@10 在真实仓库上衡量检索质量，详见[评测框架](#评测框架)。
+- **清晰的 DDD/CQRS 架构** —— 依赖向内收敛；infrastructure 只由 composition root 装配。
+
+<details>
+<summary><strong>检索行为细节</strong></summary>
+
+**查询分解。** 包含多个明确句子或列表项的仓库级请求，会被分解成一个完整查询加若干有界
+facet 查询。每个查询独立召回候选；结果用加权 rank fusion（`RETRIEVAL_RRF_K` 可调）融合后
+再重排。单查询模式用 `RETRIEVAL_DEFAULT_TOP_K`，多查询模式每个查询用
+`RETRIEVAL_PER_QUERY_TOP_K`。设 `RETRIEVAL_QUERY_DECOMPOSITION_ENABLED=false` 可关闭分解，
+回到经典单查询 Top-K。
+
+**长输入嵌入。** 超过 `max_input_chars` 的输入会在文本边界带重叠地切分、分别嵌入，再按
+长度加权、池化并归一化成一个 chunk 向量。`max_batch_size` 和 `max_batch_chars` 是每个凭据
+可覆盖的 provider 默认值（例如 SiliconFlow 单次请求 `input` 数组上限 32,000 字符）。这种
+模型特定的分段不会改变领域层的 chunk 边界。
+
+**上传准入。** 依赖/构建/缓存目录、含 NUL 的文件，以及 SVG、媒体、压缩包、压缩打包产物、
+source map、lock 文件等非源码产物会在切块前被拒绝。被跳过的路径会作为空的 ready blob
+持久化，避免客户端反复重传。项目清单和测试固件有显式豁免。
+
+</details>
 
 ## API
 
@@ -232,57 +236,18 @@ MCP 配置文件。
 
 - **公开**（无需鉴权）—— `GET /health`、`GET /version`
 - **数据面** —— `Authorization: Bearer <API_KEY>`
-- **Admin**（`/admin/*`）—— `Authorization: Bearer <ADMIN_API_KEY>`；未配置 `ADMIN_API_KEY` 时回落到 `API_KEY`
+- **Admin**（`/admin/*`）—— `Authorization: Bearer <ADMIN_API_KEY>`；未配置时回落到 `API_KEY`
 
-后端默认已放行官方 `oce-admin` 面板 `https://oce-ai.github.io`，直接使用公共面板时无需额外配置。
-若面板部署在自定义域名或私有地址，用 `CORS_ORIGINS` 覆盖（多个来源用逗号分隔）；设
-`CORS_ORIGINS=`（留空）可关闭浏览器跨域调用。admin key 仅保存在面板浏览器的本地存储中，不要写入仓库或 URL。
+完整端点参考见运行实例上 FastAPI 自动生成的交互式文档：`http://127.0.0.1:8986/docs`。
 
-### 数据面端点
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `POST` | `/find-missing` | 分类未知和未索引的 blob 哈希 |
-| `POST` | `/batch-upload` | 切块、嵌入并索引源码 blob |
-| `POST` | `/agents/codebase-retrieval` | 返回格式化的代码上下文 |
-| `POST` | `/agents/blob-status` | 校对 blob 与 checkpoint 状态 |
-| `POST` | `/checkpoint-blobs` | 创建或推进工作集 checkpoint |
-
-### Admin 端点
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/admin/credentials` | 列出模型凭据（密钥已脱敏） |
-| `POST` | `/admin/credentials` | 创建凭据 |
-| `PATCH` | `/admin/credentials/{id}` | 更新凭据 |
-| `DELETE` | `/admin/credentials/{id}` | 删除凭据 |
-| `POST` | `/admin/credentials/{id}/duplicate` | 用新 key 复制一份凭据 |
-| `POST` | `/admin/credentials/reload` | 热重载启用中的凭据 |
-| `GET` | `/admin/queue` | 嵌入队列深度与在飞数 |
-| `POST` | `/admin/queue/reset` | 清空或重置嵌入队列 |
-| `POST` | `/admin/queue/requeue-stale` | 重新入队滞留的在飞 blob |
-| `POST` | `/admin/gc` | 回收过期的 chain 与 blob |
-| `GET` | `/admin/stats` | 调用 / token / 检索 / 资源指标 |
-
-示例：
-
-```powershell
-$headers = @{ Authorization = "Bearer $env:API_KEY" }
-$body = @{
-  information_request = "Where is request authentication implemented?"
-  # 全库检索已禁用：必须声明工作集（有效的 checkpoint_id 或非空 added_blobs）。
-  # added_blobs 是 batch-upload 返回的 blob_name（sha256 内容地址），此处为示例占位。
-  blobs = @{ checkpoint_id = ""; added_blobs = @("<blob-name-from-batch-upload>"); deleted_blobs = @() }
-} | ConvertTo-Json -Depth 4
-Invoke-RestMethod http://127.0.0.1:8986/agents/codebase-retrieval `
-  -Method Post -Headers $headers -ContentType application/json -Body $body
-```
+后端默认已放行官方 admin 面板来源（`https://oce-ai.github.io`）；用 `CORS_ORIGINS`
+覆盖白名单（多个来源用逗号分隔），或留空关闭浏览器跨域调用。
 
 ## 架构
 
 依赖方向向内收敛（`shared <- domain <- application <- api`）。`infrastructure` 实现
 domain/shared 协议，且只能由 composition root（`application/container.py`）装配；router
-不编排业务流程。
+不编排业务流程。应用层负责用例编排和事务边界；FastAPI 只校验 DTO、执行鉴权和错误映射。
 
 ```mermaid
 flowchart TB
@@ -340,10 +305,6 @@ flowchart TB
     RedisQ --> Redis
 ```
 
-应用层负责用例编排和事务边界。FastAPI 只校验传输 DTO、执行鉴权和错误映射。PostgreSQL
-（个人模式下为 SQLite）存 blob/chunk/checkpoint 元数据和标识符出现位置；Milvus 存 dense
-向量和路径索引。
-
 ### 检索管线
 
 `RetrievalPipeline.search`（`domain/services/retrieval.py`）按意图分阶段执行：可选的意图
@@ -382,17 +343,14 @@ flowchart TB
 
 ## 评测框架
 
-`oce bench` 用 Top-1 + nDCG@10（每题 2 分）在真实仓库上通过 HTTP 评估检索质量。它把原本分散在独立仓库的 benchmark 能力合并为一条命令链。
-
-核心理念是**分层热调参 + 索引复用**：把"改参数"按代价分三层，让最贵的动作只发生一次。
+`oce bench` 用 Top-1 + nDCG@10（每题 2 分）在真实仓库上通过 HTTP 评估检索质量。核心理念
+是**分层热调参 + 索引复用**：把改参数按代价分三层，让最贵的动作只发生一次。
 
 | 层级 | 参数 | 代价 | 动作 |
 |---|---|---|---|
-| **L0** | 查询期参数（top_k / rrf_k / path_boost / 组件开关 / rerank 阈值…） | **秒级**，不重启不重建索引 | 通过 admin 热改端点 `reconfigure` / `sweep` |
-| **L1** | 切块 / 向量索引参数（chunk_size / HNSW M、efConstruction） | 分钟级，重嵌入但不重启 | drop collection + reindex |
-| **L2** | 嵌入模型 / 维度 / 存储后端 | 最贵，完整 reset + 重启 + 重嵌入 | 切换 profile 并重启 |
-
-`sweep` 索引一次，然后对每组参数热切换 L0 配置、跑查询、记录 `RunRecord`。热切换采用**重建 + 原子重注册**（不原地改属性），并在切换后做 read-after-write 校验（`generation` 前进且 `effective ⊇ patch`）再评分。
+| **L0** | 查询期（top_k / rrf_k / path_boost / 开关 / 阈值…） | **秒级**，不重启不重建索引 | `reconfigure` / `sweep` |
+| **L1** | 切块 / 向量索引（chunk_size / HNSW M、efConstruction） | 分钟级，重嵌入 | drop collection + reindex |
+| **L2** | 嵌入模型 / 维度 / 存储后端 | 完整 reset + 重启 + 重嵌入 | 切换 profile 并重启 |
 
 ```bash
 # 零依赖本地 profile（SQLite + Milvus Lite，同步嵌入）：
@@ -405,23 +363,21 @@ uv run oce bench sweep   --base-url http://127.0.0.1:8987 --repo flask \
 uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
 ```
 
-每次 run 写 `<run_id>.json`（compare 的唯一真源）和 `<run_id>.md`（人读视图）到 `bench/runs/`；二者从同一份 `RunRecord` 渲染，永不漂移。`compare` 自动标注每列改了哪个参数（无需文件名约定）。长期保留的 baseline 用 `compare --promote <run_id>` 晋升进受追踪的 `bench/runs/golden/`。
+每次 run 写 `<run_id>.json`（compare 的唯一真源）和 `<run_id>.md` 到 `bench/runs/`；
+二者从同一份 `RunRecord` 渲染。长期保留的 baseline 用 `compare --promote <run_id>`
+晋升进受追踪的 `bench/runs/golden/`。
 
-**安全闸**：热改端点仅在服务启动时设了 `OCE_BENCH_HOT_CONFIG=allow`（由 `oce bench serve` 注入）时才放行，否则返回 409。因此正常部署的 `oce serve` 永远不会被热改检索行为。`oce bench reset` 额外拒绝任何不含 `oce_bench` 的 DB URL，且永不 drop 受保护的生产 collection。
+完整指南（安全闸、数据集、profile、密钥）：
+[`docs/evaluation-guide.md`](docs/evaluation-guide.md)。
 
-数据集位于 `bench/datasets/`（仓库根，与 profiles、runs 同级），构建时 force-include 进 wheel——安装版 `oce` 开箱即可跑评测。Profile 位于 `bench/profiles/*.toml`；密钥通过 `<field>_env = "VAR_NAME"` 引用，从环境变量或被 gitignore 的 `bench/profiles/secrets.env` 解析——绝不写明文。完整指南见 [`docs/evaluation-guide.md`](docs/evaluation-guide.md)。
-
-## 测试
-
-按文件独立运行，让 Milvus Lite 和 tree-sitter 运行时在进程间释放：
+## 开发
 
 ```powershell
-uv run pytest tests/unit/application/test_service.py -q
-uv run pytest tests/unit/domain/test_retrieval.py -q
-uv run pytest tests/unit/infrastructure/test_milvus3.py -q
+uv sync --extra dev
+uv run pytest -q
 ```
 
-在内存受限的开发机上，不要在一个进程里运行整个 `tests/unit/infrastructure` 目录。
+项目约定与贡献约束见 [AGENTS.md](AGENTS.md)。
 
 ## 许可
 

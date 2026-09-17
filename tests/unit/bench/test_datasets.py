@@ -280,17 +280,28 @@ def test_resolve_explicit_wins_over_env(tmp_path: Path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 随包发布的真实数据集（Commit 8 迁入 src/oce/bench/datasets/ + package-data）
+# 随包发布的真实数据集（仓库根 bench/datasets/ + hatchling force-include）
 # ---------------------------------------------------------------------------
 
 
 class TestShippedDatasets:
-    """守卫随包数据集：迁入正确、可发现、metadata 配对、jsonl 合法。
+    """守卫随包数据集：源位置正确、可发现、metadata 配对、jsonl 合法。
 
-    这组测的是**包里真实存在的文件**（非 tmp fixture），故能挡住"漏拷一份/metadata 配错/
-    package-data glob 写错导致 wheel 里没有数据"这类回归。被测仓库是外部大仓、不进包，故此处
+    这组测的是**仓库里真实存在的文件**（非 tmp fixture），故能挡住"漏拷一份/metadata 配错/
+    force-include 写错导致 wheel 里没有数据"这类回归。被测仓库是外部大仓、不进包，故此处
     只验数据集自身，不验 resolve_repo_root。
     """
+
+    def test_dataset_source_lives_at_repo_root_bench(self):
+        """数据源在仓库根 bench/datasets/（src/ 树里不该再有物理数据集）。"""
+        from oce.bench import datasets as ds_mod
+
+        repo_root = Path(ds_mod.__file__).resolve().parents[3]
+        source = repo_root / "bench" / "datasets"
+        assert source.is_dir()
+        assert (source / "flask-retrieval-benchmark.jsonl").is_file()
+        legacy = Path(ds_mod.__file__).resolve().parent / "datasets"
+        assert not legacy.exists(), "src/oce/bench/datasets/ 应已被迁移掉"
 
     def test_two_datasets_shipped_and_discovered(self):
         from oce.bench.datasets import default_datasets_dir

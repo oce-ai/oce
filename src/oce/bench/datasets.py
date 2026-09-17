@@ -3,8 +3,9 @@
 取代 bench_orchestrate.py 里硬编码的绝对路径（``FLASK_REPO = C:\\Users\\...\\flask``、
 ``QUERIES = BENCH_REPO / "benchmarks" / ...``）。本模块**不含任何绝对路径**：
 
-- 数据集（``*.jsonl`` + ``*.metadata.json``）从包内 ``oce/bench/datasets/`` 发现（Commit 8
-  迁入并声明为 package-data，随 ``uv tool install`` 发布，无需 checkout oce 仓库）。
+- 数据集（``*.jsonl`` + ``*.metadata.json``）源在仓库根 ``bench/datasets/``，构建 wheel 时
+  由 hatchling force-include 进包（``oce/bench/datasets/``）。运行期由
+  ``default_datasets_dir()`` 按 ① 包内（安装版）② 仓库根（checkout）顺序解析。
 - 被测仓库是**外部大仓**（flask/cc-switch 的真实 clone），不进包；本地路径按
   显式 ``--repo-root`` > 环境变量 > cwd 同级目录约定 逐级解析，解析不到就明确报错让用户传。
 
@@ -19,9 +20,6 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-
-# 包内数据集目录（随包发布）。用 __file__ 定位，兼容 zip/wheel 安装的常规场景。
-_DATASETS_DIR = Path(__file__).parent / "datasets"
 
 # 本地被测仓库根的环境变量前缀：OCE_BENCH_REPO_FLASK=/path/to/flask
 _REPO_ENV_PREFIX = "OCE_BENCH_REPO_"
@@ -54,8 +52,27 @@ class Dataset:
 
 
 def default_datasets_dir() -> Path:
-    """包内数据集目录（Commit 8 迁入真实文件；此前可能为空）。"""
-    return _DATASETS_DIR
+    """定位数据集目录，两种安装形态都支持，无绝对路径。
+
+    1. 包内（wheel / uv tool install）：构建时 hatchling 把仓库根 bench/datasets/
+       force-include 成 oce/bench/datasets/；importlib.resources 负责按安装布局定位。
+    2. checkout（仓库内 uv run 开发）：editable 安装不带 force-include 拷贝，从
+       __file__ 上溯 3 级到仓库根的 bench/datasets/。
+
+    返回第一个真实含 *.jsonl 的目录；都不存在时返回包内路径（让调用方报错指向正位）。
+    """
+    pkg_dir = Path(__file__).resolve().parent / "datasets"
+    try:
+        from importlib.resources import files
+
+        pkg_dir = Path(str(files("oce.bench"))) / "datasets"
+    except (ImportError, TypeError, AttributeError):
+        pass  # 异常安装布局时 files() 可能给不出路径，回落 __file__
+    checkout_dir = Path(__file__).resolve().parents[3] / "bench" / "datasets"
+    for candidate in (pkg_dir, checkout_dir):
+        if candidate.is_dir() and any(candidate.glob("*.jsonl")):
+            return candidate
+    return pkg_dir
 
 
 def discover_datasets(datasets_dir: Path | None = None) -> list[Dataset]:
@@ -64,7 +81,7 @@ def discover_datasets(datasets_dir: Path | None = None) -> list[Dataset]:
     没有 metadata 的 jsonl 也收（questions 现场数行数，repository 用文件名兜底）——宽容，
     避免一个缺 metadata 的数据集让整个 list 失败。
     """
-    directory = Path(datasets_dir) if datasets_dir is not None else _DATASETS_DIR
+    directory = Path(datasets_dir) if datasets_dir is not None else default_datasets_dir()
     if not directory.is_dir():
         return []
     datasets: list[Dataset] = []
@@ -129,7 +146,7 @@ def find_dataset(
     if not available:
         raise DatasetError(
             "no datasets found; expected *.jsonl in "
-            f"{datasets_dir or _DATASETS_DIR}"
+            f"{datasets_dir or default_datasets_dir()}"
         )
     # 1) 精确 alias
     for ds in available:

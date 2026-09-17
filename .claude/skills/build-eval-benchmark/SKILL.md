@@ -1,6 +1,6 @@
 ---
 name: build-eval-benchmark
-description: 为 OCE 检索评测构建或扩展基准集——也就是 src/oce/bench/datasets/*.jsonl 里的「问题 + 标准答案(expected_files)」。当被要求「出评测题/加题/扩充 benchmark/把题量提到 N 道/增加刁钻角度/为新仓库做基准/校准难度/复核 expected_files」时使用。涵盖题目 schema、评分语义、10 类题型、难度梯度、刁钻角度清单、答案正确性校验与防过拟合规则。
+description: 为 OCE 检索评测构建或扩展基准集——也就是 bench/datasets/*.jsonl 里的「问题 + 标准答案(expected_files)」。当被要求「出评测题/加题/扩充 benchmark/把题量提到 N 道/增加刁钻角度/为新仓库做基准/校准难度/复核 expected_files」时使用。涵盖题目 schema、评分语义、10 类题型、难度梯度、刁钻角度清单、答案正确性校验与防过拟合规则。
 ---
 
 # 构建 OCE 检索评测基准
@@ -128,10 +128,10 @@ description: 为 OCE 检索评测构建或扩展基准集——也就是 src/oce
 
 ## 7. 答案正确性自检（必跑）
 
-把候选写到 `src/oce/bench/datasets/<name>.jsonl` 后，用目标仓库根目录跑：
+把候选写到 `bench/datasets/<name>.jsonl` 后，用目标仓库根目录跑：
 
 ```bash
-python - "$REPO_ROOT" src/oce/bench/datasets/<name>.jsonl <<'PY'
+python - "$REPO_ROOT" bench/datasets/<name>.jsonl <<'PY'
 import json, sys, glob as g, os
 repo, path = sys.argv[1], sys.argv[2]
 ids, errs = set(), []
@@ -185,5 +185,5 @@ PY
 - [ ] 难度 2/3 的题施加了至少一个第 5 节刁钻角度
 - [ ] 类别与难度配比符合第 6 节
 - [ ] 通过第 8 节防过拟合复核
-- [ ] 新增题写入 `src/oce/bench/datasets/`（配套 `<name>.metadata.json`），必要时更新
+- [ ] 新增题写入 `bench/datasets/`（配套 `<name>.metadata.json`），必要时更新
       `docs/evaluation-guide.md` 的题数/类别分布表

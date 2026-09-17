@@ -76,7 +76,7 @@ uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
   - profile TOML（`bench/profiles/*.toml`）密钥字段只允许 `<field>_env = "VAR_NAME"` 引用，写成字面量由 `load_profile` 拒绝；密钥取值优先级 真实 env > `bench/profiles/secrets.env`（gitignore）> `model_credentials` 表。
   - L0 热改端点仅在启动设 `OCE_BENCH_HOT_CONFIG=allow`（由 `oce bench serve` 注入）时放行，否则 409；正常 `oce serve` 永不可被热改检索行为。热改用「重建 + 原子重注册」，禁原地 `setattr`（绕过 pydantic 校验、留撕裂态）。
   - `oce bench reset` 硬闸：拒绝 DB URL 不含 `oce_bench` 的目标，且永不 drop PROTECTED collection（见 `bench/service.py`）。
-  - 数据集随包发布在 `src/oce/bench/datasets/`（pyproject package-data）；sweep 产物落 `bench/runs/`（gitignore），仅 curated `bench/runs/golden/` 入版本控制。
+  - 数据集源在仓库根 `bench/datasets/`（hatchling force-include 进 wheel；运行期 `default_datasets_dir()` 按 包内→仓库根 顺序解析）；sweep 产物落 `bench/runs/`（gitignore），仅 curated `bench/runs/golden/` 入版本控制。
   - md 报告由 `report.py` 的单一渲染体从 RunRecord 渲染，与 JSON 同源——勿另起一套渲染逻辑使二者漂移。
 
 ## 运行环境

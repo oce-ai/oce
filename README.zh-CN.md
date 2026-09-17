@@ -409,7 +409,7 @@ uv run oce bench compare --runs bench/runs --param retrieval.default_top_k
 
 **安全闸**：热改端点仅在服务启动时设了 `OCE_BENCH_HOT_CONFIG=allow`（由 `oce bench serve` 注入）时才放行，否则返回 409。因此正常部署的 `oce serve` 永远不会被热改检索行为。`oce bench reset` 额外拒绝任何不含 `oce_bench` 的 DB URL，且永不 drop 受保护的生产 collection。
 
-数据集随包发布（`src/oce/bench/datasets/`）。Profile 位于 `bench/profiles/*.toml`；密钥通过 `<field>_env = "VAR_NAME"` 引用，从环境变量或被 gitignore 的 `bench/profiles/secrets.env` 解析——绝不写明文。完整指南见 [`docs/evaluation-guide.md`](docs/evaluation-guide.md)。
+数据集位于 `bench/datasets/`（仓库根，与 profiles、runs 同级），构建时 force-include 进 wheel——安装版 `oce` 开箱即可跑评测。Profile 位于 `bench/profiles/*.toml`；密钥通过 `<field>_env = "VAR_NAME"` 引用，从环境变量或被 gitignore 的 `bench/profiles/secrets.env` 解析——绝不写明文。完整指南见 [`docs/evaluation-guide.md`](docs/evaluation-guide.md)。
 
 ## 测试
 

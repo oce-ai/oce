@@ -451,7 +451,8 @@ baselines are promoted into the tracked `bench/runs/golden/` via `compare --prom
 reset` additionally refuses any DB URL not containing `oce_bench` and never drops the protected
 production collections.
 
-Datasets ship inside the package (`src/oce/bench/datasets/`). Profiles live at
+Datasets live at `bench/datasets/` (repo root, alongside profiles and runs) and are
+force-included into the wheel, so an installed `oce` runs benchmarks out of the box. Profiles live at
 `bench/profiles/*.toml`; secrets are referenced via `<field>_env = "VAR_NAME"` and resolved from
 the environment or the gitignored `bench/profiles/secrets.env` — never written as literals. Full
 guide: [`docs/evaluation-guide.md`](docs/evaluation-guide.md).

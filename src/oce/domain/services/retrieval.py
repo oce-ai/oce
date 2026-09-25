@@ -27,6 +27,7 @@ from oce.domain.services.query_classifier import (
     classify_query_intent,
     extract_code_identifiers,
     should_use_path_index,
+    split_independent_clauses,
 )
 from oce.domain.services.query_planner import HeuristicQueryPlanner, QueryPlanner
 from oce.domain.services.reranker import NoopReranker, Reranker
@@ -171,10 +172,17 @@ class RetrievalPipeline:
         # 意图驱动的策略选择
         strategy = None
         detected_intent = None
+        intent_decision = None
         if self.intent_classifier is not None:
             try:
                 with stage("intent"):
-                    detected_intent = await self.intent_classifier.classify(query)
+                    classify_with_decision = getattr(
+                        self.intent_classifier, "classify_with_decision", None
+                    )
+                    if classify_with_decision is not None:
+                        detected_intent, intent_decision = await classify_with_decision(query)
+                    else:
+                        detected_intent = await self.intent_classifier.classify(query)
             except Exception as e:
                 # LLM 意图分类失败（未配 key、超时、限流等）回退启发式分类，
                 # 不让单次检索因 LLM 不可用而崩溃；启发式为纯正则，恒定可用。
@@ -182,10 +190,17 @@ class RetrievalPipeline:
                     f"LLM intent classification failed: {e}, falling back to heuristic"
                 )
                 detected_intent = _heuristic_to_llm_intent(classify_query_intent(query))
+                intent_decision = None
             strategy = get_strategy(detected_intent)
             logger.debug(f"Query intent: {detected_intent.value}, strategy: {strategy}")
         if audit is not None and detected_intent is not None:
             audit.intent = detected_intent.value
+            if intent_decision is not None:
+                audit.intent_source = getattr(intent_decision, "source", None)
+                audit.intent_decision_reason = getattr(intent_decision, "reason", None)
+            else:
+                audit.intent_source = "fallback" if self.intent_classifier is not None else "heuristic"
+                audit.intent_decision_reason = "classifier_compatibility_path"
 
         # 路径索引增强：根据意图或启发式判断
         use_path_index = (
@@ -224,6 +239,23 @@ class RetrievalPipeline:
             if rewritten_queries:
                 queries_to_search = rewritten_queries
 
+        # 复合查询拆分：检测器（与意图分类共用同一套连接词/任务谓词/守卫）
+        # 判定为独立复合时，把子查询加入检索列表，每路子查询独立规划/召回/
+        # 融合；原查询保留，召回不缩水。检测器驱动而非标签驱动：heuristic
+        # 分类器没有 M 分支，hybrid 模式的 soft provider 也可能缺席。
+        compound_parts = split_independent_clauses(query)
+        if len(compound_parts) >= 2:
+            known = set(queries_to_search)
+            queries_to_search.extend(
+                part for part in compound_parts if part not in known
+            )
+            if audit is not None:
+                audit.compound_parts = compound_parts
+            logger.info(
+                "Compound query split into %d retrieval branches",
+                len(queries_to_search),
+            )
+
         # 对每个查询执行完整检索流程
         all_result_lists = []
         with stage("dense"):
@@ -247,7 +279,7 @@ class RetrievalPipeline:
 
         with stage("fuse"):
             hits = self._fuse(all_result_lists) if all_result_lists else []
-            hits = self._merge_exact_hits(query, exact_hits, hits)
+            hits = self._merge_exact_hits(query, exact_hits, hits, intent=detected_intent)
         with stage("rerank"):
             hits = await self.reranker.rerank(query, hits)
         hits = self._apply_source_priority(hits)
@@ -260,7 +292,7 @@ class RetrievalPipeline:
         if use_llm_rerank:
             with stage("llm_rerank"):
                 hits = await self._llm_rerank_hits(query, hits)
-        hits = self._promote_symbol_endpoints(query, hits)
+        hits = self._promote_symbol_endpoints(query, hits, intent=detected_intent)
 
         with stage("select"):
             hits = self._apply_confidence_floor(hits)
@@ -357,9 +389,12 @@ class RetrievalPipeline:
         query: str,
         exact_hits: list[SearchHit],
         semantic_hits: list[SearchHit],
+        *,
+        intent: QueryIntent | None = None,
     ) -> list[SearchHit]:
+        effective_intent = intent or _heuristic_to_llm_intent(classify_query_intent(query))
         if (
-            classify_query_intent(query) == HeuristicQueryIntent.CALL_CHAIN
+            effective_intent == QueryIntent.CALL_CHAIN
             and semantic_hits
         ):
             semantic_keys = {search_hit_key(hit) for hit in semantic_hits}
@@ -403,9 +438,12 @@ class RetrievalPipeline:
     def _promote_symbol_endpoints(
         query: str,
         hits: list[SearchHit],
+        *,
+        intent: QueryIntent | None = None,
     ) -> list[SearchHit]:
         """符号定位时，框架 endpoint 定义稳定优先于同名内部实现。"""
-        if classify_query_intent(query) != HeuristicQueryIntent.SYMBOL:
+        effective_intent = intent or _heuristic_to_llm_intent(classify_query_intent(query))
+        if effective_intent != QueryIntent.SYMBOL:
             return hits
         location_markers = (
             "实现位置",

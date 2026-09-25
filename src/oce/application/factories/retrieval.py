@@ -34,6 +34,7 @@ from loguru import logger
 from oce.application.queries.search import SearchQueryHandler
 from oce.domain.services.retrieval import RetrievalPipeline
 from oce.infrastructure.llm.credential_llm_client import CredentialConfiguredLLMClient
+from oce.infrastructure.llm.openai_compatible_client import is_blocked_paid_llm_endpoint
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.shared.config.settings import LLMSettings, Settings
 from oce.shared.metrics import MetricsSink
@@ -139,21 +140,49 @@ def build_retrieval_stack(settings: Settings, deps: RetrievalDeps) -> RetrievalS
 
     intent_classifier = None
     if retrieval.intent_classification_enabled:
-        intent_llm = CredentialConfiguredLLMClient(
-            "intent",
-            deps.session_factory,
-            llm,
-            fallback_model=llm.model,
-            on_usage=deps.token_usage_cb,
+        from oce.domain.services.llm.intent import (
+            HybridIntentClassifier,
+            LayaSoftSignalProvider,
         )
-        llm_clients.append(intent_llm)
-        from oce.domain.services.llm.intent import IntentClassifier
 
-        intent_classifier = IntentClassifier(
-            llm_client=intent_llm,
+        # 检查是否允许调用付费 LLM endpoint
+        blocked_paid_endpoint = is_blocked_paid_llm_endpoint(llm.base_url)
+        if blocked_paid_endpoint:
+            logger.warning(
+                "Alibaba/DashScope intent endpoint blocked; LLM soft signals disabled"
+            )
+
+        # 构建可选的 soft signal provider
+        soft_provider = None
+        if retrieval.intent_allow_llm and not blocked_paid_endpoint:
+            intent_llm = CredentialConfiguredLLMClient(
+                "intent",
+                deps.session_factory,
+                llm,
+                fallback_model=llm.model,
+                on_usage=deps.token_usage_cb,
+            )
+            llm_clients.append(intent_llm)
+            soft_provider = LayaSoftSignalProvider(
+                llm_client=intent_llm,
+                model=llm.model,
+                timeout_ms=50,  # 硬编码合理默认值
+                min_confidence=0.60,
+                cache_size=1024,
+                prompt_version="soft-v1",
+            )
+
+        # 总是使用 HybridIntentClassifier（hard signals + resolver + optional soft）
+        intent_classifier = HybridIntentClassifier(
             model=llm.model,
+            soft_provider=soft_provider,
+            min_confidence=0.60,
+            resolver_version="hybrid-v2",
         )
-        logger.info("Intent classifier enabled (kind=intent)")
+        logger.info(
+            "Intent classifier enabled (hybrid, soft_signals={})",
+            soft_provider is not None,
+        )
 
     path_store = deps.path_index if retrieval.path_index_enabled else None
 

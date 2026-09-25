@@ -61,6 +61,8 @@ class RetrievalMetricRecord:
     total_ms: int
     scope_size: int | None = None
     intent: str | None = None
+    intent_source: str | None = None
+    intent_decision_reason: str | None = None
     path_boosted: bool = False
     query_text: str | None = None
     stages: dict[str, int] = field(default_factory=dict)
@@ -76,7 +78,10 @@ class RetrievalAudit:
     """
 
     intent: str | None = None
+    intent_source: str | None = None
+    intent_decision_reason: str | None = None
     path_boosted: bool = False
+    compound_parts: list[str] | None = None
     scope_size: int | None = None
     stages: dict[str, int] = field(default_factory=dict)
 

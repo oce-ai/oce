@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -295,7 +296,14 @@ class RetrievalSettings(BaseSettings):
 
     # Intent classification (意图分类驱动的检索策略)
     intent_classification_enabled: bool = Field(
-        default=True, description="是否启用查询意图分类（LLM-based）", json_schema_extra={"tier": 2}
+        default=True,
+        description="启用混合意图分类（规则 + hard signals + resolver）",
+        json_schema_extra={"tier": 2}
+    )
+    intent_allow_llm: bool = Field(
+        default=False,
+        description="允许调用 LLM 提供 soft signals（默认关闭，纯规则模式省钱）",
+        json_schema_extra={"tier": 2}
     )
 
 

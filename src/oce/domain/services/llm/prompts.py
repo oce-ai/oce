@@ -111,6 +111,8 @@ Classification rules (in priority order):
    - Asks "where is it defined" / "implementation location" / "source" / "which file defines it" / "where is the function" → S
    - Asks "what does it register" / "what does it contain" (querying the symbol's contents) → S
    - Asks "in which files is it used" / "usage locations" (static reference lookup) → S
+     (legacy 7-way prompt contract; hybrid-v2's resolver intentionally maps
+     this boundary to R and does not inherit this benchmark convention.)
    - Asks "full call chain" / "from X to Y" / "call path" / "how is it triggered" / "how is it used" / "front-to-back-end" → C
    - Asks "how to call it" / "how to use it" / "API usage" (single-point lookup, no flow words) → R
 
@@ -132,3 +134,33 @@ Important:
 INTENT_USER_TEMPLATE = """
 Query: {query}
 Label:"""
+
+
+# ---- hybrid intent soft signals ----
+# The model is deliberately not shown the final S/C/R/P/F/O/M taxonomy.  It only
+# answers independent semantic questions; OCE's deterministic resolver owns the
+# final label and all precedence rules.
+INTENT_SOFT_PROMPT_VERSION = "soft-v1"
+
+INTENT_SOFT_SYSTEM_PROMPT = """You extract five independent semantic signals for a code-search query.
+
+Return one JSON object only. Each key must contain {"value": true|false|null,
+"confidence": 0.0..1.0}. Use null when the query is ambiguous. Do not choose a
+final intent label.
+
+- asks_call_chain: true only for a multi-step call chain, trigger path, execution
+  flow, or end-to-end flow across components.
+- asks_api_usage: true only when asking how to call or use one concrete symbol or
+  API, without asking for a multi-step flow.
+- asks_overview: true for architecture, mechanisms, scheduling, event handling,
+  state management, or system-level interactions rather than one concrete symbol.
+- asks_compound: true only for two or more independent retrieval goals; modifiers
+  joined by "and" are still one goal.
+- asks_implementation: true when asking where or how a feature, behavior, or
+  capability is implemented without naming one concrete code symbol.
+
+Required keys: asks_call_chain, asks_api_usage, asks_overview, asks_compound,
+asks_implementation."""
+
+INTENT_SOFT_USER_TEMPLATE = """<query>{query}</query>
+<hard_signals>{hard_signals}</hard_signals>"""

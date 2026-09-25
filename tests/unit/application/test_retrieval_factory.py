@@ -14,10 +14,11 @@ import pytest
 from oce.application.factories.retrieval import RetrievalDeps, build_retrieval_stack
 from oce.application.queries.search import SearchQueryHandler
 from oce.domain.services.retrieval import RetrievalPipeline
+from oce.domain.services.llm.intent import HybridIntentClassifier, HeuristicIntentClassifier, IntentClassifier
 from oce.domain.services.reranker import NoopReranker
 from oce.domain.services.selector.coverage_selector import CoverageSelector
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
-from oce.shared.config.settings import LLMSettings, Settings
+from oce.shared.config.settings import LLMSettings, RetrievalSettings, Settings
 from oce.shared.metrics import NoopMetricsSink
 
 from tests.unit.application.fakes import FakeEmbedder, FakeSearchStore
@@ -67,6 +68,8 @@ def _deps(**overrides) -> RetrievalDeps:
     )
     defaults.update(overrides)
     return RetrievalDeps(**defaults)
+
+
 
 
 class TestSelectorConstruction:
@@ -136,6 +139,36 @@ class TestComponentGating:
         assert stack.pipeline.query_rewriter is None
         assert stack.pipeline.intent_classifier is None
         # 全关 → 不构造任何 LLM client（避免 /admin/credentials/reload 多出无谓 DB 查询）
+        assert stack.llm_clients == ()
+
+    def test_hybrid_classifier_builds_without_llm_by_default(self):
+        settings = _settings(
+            intent_classification_enabled=True,
+            intent_allow_llm=False,
+        )
+        stack = build_retrieval_stack(settings, _deps())
+        assert isinstance(stack.pipeline.intent_classifier, HybridIntentClassifier)
+        assert stack.pipeline.intent_classifier.soft_provider is None
+        assert stack.llm_clients == ()
+
+    def test_hybrid_classifier_blocks_legacy_alibaba_endpoint(self):
+        settings = Settings(
+            llm=LLMSettings(
+                rerank_enabled=False,
+                api_key="k",
+                model="m",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+        )
+        retrieval = settings.retrieval.model_copy(
+            update={
+                "intent_classification_enabled": True,
+                "intent_allow_llm": True,
+            }
+        )
+        stack = build_retrieval_stack(settings.model_copy(update={"retrieval": retrieval}), _deps())
+        assert isinstance(stack.pipeline.intent_classifier, HybridIntentClassifier)
+        assert stack.pipeline.intent_classifier.soft_provider is None
         assert stack.llm_clients == ()
 
     def test_query_rewriter_built_when_enabled(self):

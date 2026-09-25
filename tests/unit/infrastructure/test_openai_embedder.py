@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from oce.infrastructure.embed.openai_embedder import OpenAIEmbedder
+from oce.shared.endpoint_policy import BlockedPaidEndpointError
 
 
 class _FakeEmbeddings:
@@ -94,6 +95,16 @@ def test_invalid_input_budget_is_rejected():
             2,
             max_batch_chars=4,
             max_input_chars=5,
+        )
+
+
+def test_from_endpoint_blocks_alibaba_before_client_creation():
+    with pytest.raises(BlockedPaidEndpointError):
+        OpenAIEmbedder.from_endpoint(
+            endpoint="https://dashscope.aliyuncs.com/compatible-api/v1",
+            api_key="sk",
+            model="embed",
+            dimensions=2,
         )
 
 

@@ -43,7 +43,7 @@ def _make_reranker(*, top_n=10, min_score=0.1, response_payload=None,
         fake_client.post = AsyncMock(return_value=_fake_response(response_payload or {}))
 
     reranker = OpenAIReranker(
-        endpoint="https://dashscope.aliyuncs.com/compatible-api/v1/reranks",
+        endpoint="https://rerank.test/v1/reranks",
         api_key="sk-xxx",
         model="qwen3-rerank",
         top_n=top_n,
@@ -64,6 +64,16 @@ async def test_rerank_empty_hits_returns_empty():
     result = await reranker.rerank("q", [])
     assert result == []
     client.post.assert_not_awaited()  # 空就不发请求
+
+
+@pytest.mark.asyncio
+async def test_rerank_blocks_alibaba_endpoint_before_post():
+    reranker, client = _make_reranker(response_payload={"results": []})
+    reranker._endpoint = "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
+    hits = [_Hit(content="d1")]
+
+    assert await reranker.rerank("q", hits) == hits
+    client.post.assert_not_awaited()
 
 
 # ── SiliconFlow body shape ──────────────────────────────────────────────

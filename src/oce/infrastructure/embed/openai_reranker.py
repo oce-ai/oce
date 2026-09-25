@@ -8,6 +8,8 @@ from typing import Any, Awaitable, Callable
 import httpx
 from loguru import logger
 
+from oce.shared.endpoint_policy import is_blocked_paid_endpoint
+
 # 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)
 UsageCallback = Callable[[int, str, str, int, int], Awaitable[None]]
 
@@ -43,6 +45,9 @@ class OpenAIReranker:
     async def rerank(self, query: str, hits: list[Any]) -> list[Any]:
         if not hits:
             return []
+        if is_blocked_paid_endpoint(self._endpoint):
+            logger.warning("Alibaba/DashScope rerank endpoint blocked; request was not sent")
+            return hits[: self._top_n]
         documents, keep_idx = self._slim_documents(hits)
         if not documents:
             return hits[: self._top_n]

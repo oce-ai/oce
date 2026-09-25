@@ -8,6 +8,10 @@ import httpx
 from loguru import logger
 
 from oce.infrastructure.llm.rate_limiter import TokenRateLimiter, estimate_tokens
+from oce.shared.endpoint_policy import (
+    BlockedPaidEndpointError,
+    is_blocked_paid_endpoint,
+)
 
 # 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)。
 # credential_id 由上层（CredentialConfiguredLLMClient）按解析到的 DB 凭证注入；
@@ -20,6 +24,15 @@ _OUTPUT_TOKEN_ALLOWANCE = 256
 # 限流器按估算值排队，估算偏松时仍可能 429，退避重试兜底
 _MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 20.0
+
+def is_blocked_paid_llm_endpoint(base_url: str | None) -> bool:
+    """Compatibility alias for the shared no-Alibaba endpoint policy."""
+    return is_blocked_paid_endpoint(base_url)
+
+
+class BlockedLLMEndpointError(BlockedPaidEndpointError):
+    """Raised before network I/O for a retired paid endpoint."""
+
 
 class OpenAICompatibleLLMClient:
     """OpenAI 兼容的 LLM 聊天客户端（/v1/chat/completions），rerank / rewrite / intent 共用。"""
@@ -71,6 +84,10 @@ class OpenAICompatibleLLMClient:
         Returns:
             模型响应内容
         """
+        if is_blocked_paid_llm_endpoint(self.base_url):
+            raise BlockedLLMEndpointError(
+                "Alibaba/DashScope LLM endpoint is disabled; request was not sent"
+            )
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",

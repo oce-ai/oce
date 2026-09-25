@@ -9,6 +9,8 @@ from typing import Awaitable, Callable
 import httpx
 from openai import AsyncOpenAI
 
+from oce.shared.endpoint_policy import BlockedPaidEndpointError, is_blocked_paid_endpoint
+
 # 用量回调：(credential_id, kind, model, prompt_tokens, completion_tokens)
 UsageCallback = Callable[[int, str, str, int, int], Awaitable[None]]
 
@@ -67,6 +69,10 @@ class OpenAIEmbedder:
         query_instruction: str = "",
         **_: object,
     ) -> "OpenAIEmbedder":
+        if is_blocked_paid_endpoint(endpoint):
+            raise BlockedPaidEndpointError(
+                "Alibaba/DashScope embedding endpoint is disabled; client was not created"
+            )
         base_url = endpoint.rstrip("/")
         if base_url.endswith("/embeddings"):
             base_url = base_url[: -len("/embeddings")]

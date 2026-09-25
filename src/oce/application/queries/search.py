@@ -73,6 +73,8 @@ class SearchQueryHandler:
                 total_ms=total_ms,
                 scope_size=audit.scope_size,
                 intent=audit.intent,
+                intent_source=audit.intent_source,
+                intent_decision_reason=audit.intent_decision_reason,
                 path_boosted=audit.path_boosted,
                 query_text=query.query if self.store_query_text else None,
                 stages=dict(audit.stages),

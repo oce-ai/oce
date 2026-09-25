@@ -120,6 +120,7 @@ HOT_RETRIEVAL_FIELDS: frozenset[str] = frozenset(
         # 路径索引 / 意图分类（门控，靠重建生效）
         "path_index_enabled",
         "intent_classification_enabled",
+        "intent_allow_llm",
     }
 )
 

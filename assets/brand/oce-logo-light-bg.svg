@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">OpenContextEngine mark</title>
-  <desc id="desc">An open context glyph containing three selected code-context bars.</desc>
+  <title id="title">OpenContextEngine logo on light background</title>
+  <desc id="desc">Open context glyph with selected context bars.</desc>
   <defs>
     <linearGradient id="context-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#3AA7FF"/>
       <stop offset="100%" stop-color="#A462FF"/>
     </linearGradient>
   </defs>
+  <rect width="1024" height="1024" fill="#F7F9FC"/>
   <path d="M738 308 L456 308 L314 444 L314 700 L506 820 L758 820"
         fill="none" stroke="#031B47" stroke-width="110"
         stroke-linecap="round" stroke-linejoin="round"/>

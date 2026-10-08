@@ -172,6 +172,8 @@ def _section_for_secret(secret_field: str) -> tuple[str, str]:
         "embed_api_key": ("embedding", "api_key"),
         "rerank_api_key": ("rerank", "api_key"),
         "llm_api_key": ("llm", "api_key"),
+        # 意图判定源（TypeSafe）的 key 落在 [pipeline] 段，与 LLM key 分离
+        "intent_provider_api_key": ("pipeline", "intent_provider_api_key"),
     }
     return mapping[secret_field]
 

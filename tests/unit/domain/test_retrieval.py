@@ -10,7 +10,7 @@ from dataclasses import replace
 
 import pytest
 
-from oce.domain.services.llm.intent import QueryIntent
+from oce.domain.services.intent.taxonomy import QueryIntent
 from oce.domain.services.retrieval import RetrievalPipeline, source_priority_factor
 from oce.domain.services.search import SearchHit
 from oce.shared.config.settings import RetrievalSettings
@@ -46,11 +46,16 @@ class FakeEmbedder:
 
 
 class FakeIntentClassifier:
+    """与 IntentResolver 同形的测试替身：只实现 resolve()。"""
+
     def __init__(self, intent: QueryIntent):
         self.intent = intent
 
-    async def classify(self, query: str) -> QueryIntent:
-        return self.intent
+    async def resolve(self, query: str):
+        from oce.domain.services.intent.resolver import resolve_rules
+
+        decision = resolve_rules(query)
+        return replace(decision, intent=self.intent)
 
 
 class FakePathStore:

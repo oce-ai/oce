@@ -1,0 +1,38 @@
+# 本地评测 profile —— 与 local.toml 同构，但开启意图分类 + TypeSafe 判定源。
+#
+#   oce bench serve --profile local-intent --tag intent --port 8988
+#   oce bench run   --base-url http://127.0.0.1:8988 --repo <flask-path>
+#
+# 与 local.toml 的唯一差异是 [pipeline] 里意图相关的几个键；存储、隔离、嵌入
+# 端点全部相同，因此两者的分数可直接对比。
+#
+# 密钥：intent_provider_api_key 是 SECRET_FIELDS 成员，只能写 _env 引用；
+# 取值经 bench/profiles/secrets.env（gitignore）或真实 env 解析，绝不入版本控制。
+
+[backend]
+db_path = "{data_dir}/oce_bench.db"
+milvus_path = "{data_dir}/oce_bench_milvus.db"
+
+[isolation]
+collection_prefix = "bench_intent"
+queue_template = "oce:bench_intent_{tag}"
+
+[service]
+worker_concurrency = 4
+
+[embedding]
+max_concurrency = 4
+max_batch_size = 32
+
+[pipeline]
+default_top_k = 30
+final_select_k = 10
+rrf_k = 60
+query_decomposition_enabled = false
+# 被测对象：意图分类 + TypeSafe System One 概率判定源
+intent_classification_enabled = true
+intent_provider_enabled = true
+intent_provider_model = "jev-latest"
+intent_provider_timeout_seconds = 10.0
+intent_provider_min_confidence = 0.6
+intent_provider_api_key_env = "RETRIEVAL_INTENT_PROVIDER_API_KEY"

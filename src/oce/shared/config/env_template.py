@@ -32,10 +32,12 @@ _SECRET_STEMS = ("api_key", "token", "secret")
 # 这些组对用户无意义甚至误导（如 WORKER_ENABLED 实际恒 false），生成个人模板时整组跳过
 _PERSONAL_SKIP_GROUPS = {"DatabaseSettings", "RedisSettings", "WorkerSettings"}
 # 共用 LLM 客户端的开关，总览里标 [LLM] 提示需配 LLM_API_KEY
+# 意图分类同样优先解析 kind=intent 的集中凭据；无匹配行时先回落
+# RETRIEVAL_INTENT_PROVIDER_API_KEY（TypeSafe），再回落 LLM_*（OpenAI 兼容）。
+# 所有来源均无 key 时运行纯规则；RETRIEVAL_INTENT_PROVIDER_ENABLED=false 可关闭外部判定。
 _LLM_FLAGS = {
     "LLM_RERANK_ENABLED",
     "RETRIEVAL_QUERY_REWRITE_ENABLED",
-    "RETRIEVAL_INTENT_CLASSIFICATION_ENABLED",
 }
 _TIER_HEADERS = {
     1: "Tier 1 · 最小启动必填",

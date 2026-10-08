@@ -18,8 +18,8 @@
 - ``path_store`` 按 ``path_index_enabled`` 挂/摘。注意 ``deps.path_index`` 本身也是
   flag 门控的（关闭时为 None，否则 worker 会去写路径向量）：启动时关闭、之后热开，
   拿到的仍是 None，静默无效。调用方（reconfigurator）需显式拒绝这种情况。
-- LLM 三件套（llm_rerank / query_rewrite / intent）各自按 flag 决定是否构造。
-  ``CredentialConfiguredLLMClient`` 构造是惰性的（首次 chat 才查库），但
+- 模型客户端各自按 flag 决定是否构造，意图判定源也解析集中凭据。
+  凭据客户端构造是惰性的（首次请求才查库），但
   ``reload()`` 会查库，故**不能**无条件全构造 —— 那会让
   ``/admin/credentials/reload`` 多出无谓的 DB 查询。
 """
@@ -33,8 +33,8 @@ from loguru import logger
 
 from oce.application.queries.search import SearchQueryHandler
 from oce.domain.services.retrieval import RetrievalPipeline
+from oce.infrastructure.intent.credential_provider import CredentialConfiguredIntentProvider
 from oce.infrastructure.llm.credential_llm_client import CredentialConfiguredLLMClient
-from oce.infrastructure.llm.openai_compatible_client import is_blocked_paid_llm_endpoint
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
 from oce.shared.config.settings import LLMSettings, Settings
 from oce.shared.metrics import MetricsSink
@@ -71,6 +71,7 @@ class RetrievalStack:
     symbol_store: SymbolSearchStore
     # 本次构造新建的 LLM 客户端；调用方据此同步 _CredentialRuntime 的 reload 覆盖面
     llm_clients: tuple[CredentialConfiguredLLMClient, ...]
+    intent_provider: CredentialConfiguredIntentProvider | None
 
 
 def build_retrieval_stack(settings: Settings, deps: RetrievalDeps) -> RetrievalStack:
@@ -139,49 +140,25 @@ def build_retrieval_stack(settings: Settings, deps: RetrievalDeps) -> RetrievalS
         logger.info("Query rewriter enabled (kind=query_rewrite)")
 
     intent_classifier = None
+    intent_provider = None
     if retrieval.intent_classification_enabled:
-        from oce.domain.services.llm.intent import (
-            HybridIntentClassifier,
-            LayaSoftSignalProvider,
-        )
-
-        # 检查是否允许调用付费 LLM endpoint
-        blocked_paid_endpoint = is_blocked_paid_llm_endpoint(llm.base_url)
-        if blocked_paid_endpoint:
-            logger.warning(
-                "Alibaba/DashScope intent endpoint blocked; LLM soft signals disabled"
-            )
-
-        # 构建可选的 soft signal provider
-        soft_provider = None
-        if retrieval.intent_allow_llm and not blocked_paid_endpoint:
-            intent_llm = CredentialConfiguredLLMClient(
-                "intent",
+        from oce.domain.services.intent.resolver import IntentResolver
+        # 是否存在 DB 凭据只能在首次请求时判定，不能因环境 key 为空就摘掉 provider。
+        if retrieval.intent_provider_enabled:
+            intent_provider = CredentialConfiguredIntentProvider(
                 deps.session_factory,
+                retrieval,
                 llm,
-                fallback_model=llm.model,
                 on_usage=deps.token_usage_cb,
             )
-            llm_clients.append(intent_llm)
-            soft_provider = LayaSoftSignalProvider(
-                llm_client=intent_llm,
-                model=llm.model,
-                timeout_ms=50,  # 硬编码合理默认值
-                min_confidence=0.60,
-                cache_size=1024,
-                prompt_version="soft-v1",
-            )
 
-        # 总是使用 HybridIntentClassifier（hard signals + resolver + optional soft）
-        intent_classifier = HybridIntentClassifier(
-            model=llm.model,
-            soft_provider=soft_provider,
-            min_confidence=0.60,
-            resolver_version="hybrid-v2",
+        intent_classifier = IntentResolver(
+            provider=intent_provider,
+            min_confidence=retrieval.intent_provider_min_confidence,
         )
         logger.info(
-            "Intent classifier enabled (hybrid, soft_signals={})",
-            soft_provider is not None,
+            "Intent classification enabled (provider={})",
+            "credential-configured" if intent_provider is not None else "rules-only",
         )
 
     path_store = deps.path_index if retrieval.path_index_enabled else None
@@ -202,10 +179,12 @@ def build_retrieval_stack(settings: Settings, deps: RetrievalDeps) -> RetrievalS
         metrics=deps.metrics,
         retrieval_audit_enabled=deps.retrieval_audit_enabled,
         store_query_text=deps.store_query_text,
+        on_close=intent_provider.aclose if intent_provider is not None else None,
     )
     return RetrievalStack(
         pipeline=pipeline,
         handler=handler,
         symbol_store=symbol_store,
         llm_clients=tuple(llm_clients),
+        intent_provider=intent_provider,
     )

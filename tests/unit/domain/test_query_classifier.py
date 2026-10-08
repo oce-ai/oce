@@ -94,17 +94,28 @@ class TestQueryIntentClassification:
             # 含"实现"+"事件处理"/"状态管理"/"调度"应判为 OVERVIEW
             assert intent == QueryIntent.OVERVIEW
 
-    def test_reference_queries(self):
-        """引用/使用类查询（符号+使用动词）"""
-        queries = [
+    def test_usage_site_queries(self):
+        """引用点查询：问「在哪些文件/哪里用到」应判为 USAGE。
+
+        8 标签体系把它与 R（问契约：签名、参数、怎么调用）分开：前者要跨文件
+        铺开所有调用处，后者要权威的签名与示例。旧 7 类体系没有 U，这类查询
+        只能挤进 R。
+        """
+        usage_sites = [
             "`tauri::command` 宏在哪些文件中使用？",
-            "`get_providers` 在前端如何使用？",
             "`auth_poll_for_account` 如何被前端使用？",
         ]
-        for q in queries:
-            intent = classify_query_intent(q)
-            # "如何使用" / "如何被使用" 应判为 REFERENCE
-            assert intent in (QueryIntent.REFERENCE, QueryIntent.CALL_CHAIN)
+        for q in usage_sites:
+            assert classify_query_intent(q) == QueryIntent.USAGE
+
+    def test_api_contract_queries(self):
+        """契约查询：问怎么调用/参数/返回值应判为 REFERENCE。"""
+        contracts = [
+            "`get_providers` 在前端如何使用？",
+            "`add_provider` 的参数和返回值是什么？",
+        ]
+        for q in contracts:
+            assert classify_query_intent(q) == QueryIntent.REFERENCE
 
 
 class TestLegacyCompatibility:
@@ -167,12 +178,15 @@ class TestBilingualSymmetry:
         query = "how is `add_provider` called from the frontend?"
         assert classify_query_intent(query) == QueryIntent.CALL_CHAIN
 
-    def test_english_reference_query(self):
+    def test_english_usage_site_query(self):
+        """``how is X used in ...`` 问的是使用位置 -> USAGE。"""
         query = "how is `get_providers` used in the frontend?"
-        assert classify_query_intent(query) in (
-            QueryIntent.REFERENCE,
-            QueryIntent.CALL_CHAIN,
-        )
+        assert classify_query_intent(query) == QueryIntent.USAGE
+
+    def test_english_api_contract_query(self):
+        """``how do I call X`` 问的是契约 -> REFERENCE。"""
+        query = "how do I call `get_providers`?"
+        assert classify_query_intent(query) == QueryIntent.REFERENCE
 
     def test_english_overview_query(self):
         query = "the state management architecture of the app"

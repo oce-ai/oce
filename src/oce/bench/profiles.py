@@ -94,6 +94,8 @@ SECRET_FIELDS: frozenset[str] = frozenset({
     "embed_api_key",
     "rerank_api_key",
     "llm_api_key",
+    # 意图判定源（TypeSafe System One）的 key，与 LLM key 分离
+    "intent_provider_api_key",
 })
 
 # profile 注入的 pipeline L0 字段 -> 环境变量名。这些是 serve_bench 设定的"确定性
@@ -109,8 +111,22 @@ _PIPELINE_ENV: dict[str, str] = {
     "query_rewrite_enabled": "RETRIEVAL_QUERY_REWRITE_ENABLED",
     "query_decomposition_enabled": "RETRIEVAL_QUERY_DECOMPOSITION_ENABLED",
     "intent_classification_enabled": "RETRIEVAL_INTENT_CLASSIFICATION_ENABLED",
+    # 意图概率判定源（TypeSafe System One）。api_key 是密钥字段，profile 里
+    # 只能写 ``intent_provider_api_key_env = "VAR"``，取值经 secrets.env / 真实
+    # env 解析，绝不入版本控制。
+    "intent_provider_enabled": "RETRIEVAL_INTENT_PROVIDER_ENABLED",
+    "intent_provider_base_url": "RETRIEVAL_INTENT_PROVIDER_BASE_URL",
+    "intent_provider_model": "RETRIEVAL_INTENT_PROVIDER_MODEL",
+    "intent_provider_timeout_seconds": "RETRIEVAL_INTENT_PROVIDER_TIMEOUT_SECONDS",
+    "intent_provider_min_confidence": "RETRIEVAL_INTENT_PROVIDER_MIN_CONFIDENCE",
+    "intent_provider_cache_size": "RETRIEVAL_INTENT_PROVIDER_CACHE_SIZE",
     "rerank_enabled": "RERANK_ENABLED",
     "llm_rerank_enabled": "LLM_RERANK_ENABLED",
+}
+
+#: pipeline 段里需要走密钥解析的键 -> 环境变量名。
+_PIPELINE_SECRET_ENV: dict[str, str] = {
+    "intent_provider_api_key": "RETRIEVAL_INTENT_PROVIDER_API_KEY",
 }
 
 
@@ -238,9 +254,13 @@ class LLM:
 
 @dataclass(frozen=True)
 class Pipeline:
-    """L0 检索默认值（运行期可热改）。只存 profile 显式给出的键。"""
+    """L0 检索默认值（运行期可热改）。只存 profile 显式给出的键。
+
+    ``secrets`` 单独存放密钥字段的 env 引用，解析后的明文只进 os.environ。
+    """
 
     values: dict[str, object] = field(default_factory=dict)
+    secrets: dict[str, "_SecretRef"] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -461,14 +481,29 @@ def _load_llm(section: dict, *, path: Path) -> LLM:
 
 
 def _load_pipeline(section: dict, *, path: Path) -> Pipeline:
-    unknown = set(section) - set(_PIPELINE_ENV)
+    """校验 [pipeline] 字段；密钥字段只接受 ``<name>_env`` 引用。
+
+    ``intent_provider_api_key`` 在 SECRET_FIELDS 里，写成字面量会被
+    ``_secret_ref`` 拒绝——否则 key 会随 profile TOML 进版本控制。
+    """
+    values = dict(section)
+    secrets: dict[str, _SecretRef] = {}
+    for name in _PIPELINE_SECRET_ENV:
+        ref = _secret_ref(values, name, path=path, table="pipeline")
+        # 密钥键由 secrets 承载，从 values 里摘掉，否则下面的未知字段校验会拒绝它们
+        values.pop(name, None)
+        values.pop(f"{name}_env", None)
+        if ref.env_var is not None or ref.value is not None:
+            secrets[name] = ref
+
+    unknown = set(values) - set(_PIPELINE_ENV)
     _require(
         not unknown,
         f"[pipeline] unknown field(s): {sorted(unknown)} "
-        f"(known: {sorted(_PIPELINE_ENV)})",
+        f"(known: {sorted(_PIPELINE_ENV) + sorted(_PIPELINE_SECRET_ENV)})",
         path=path,
     )
-    return Pipeline(values=dict(section))
+    return Pipeline(values=values, secrets=secrets)
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +709,10 @@ def build_env(
     for key, value in profile.pipeline.values.items():
         env_name = _PIPELINE_ENV[key]  # _load_pipeline 已校验 key 在白名单内
         env[env_name] = _bool_str(value) if isinstance(value, bool) else str(value)
+    for key, ref in profile.pipeline.secrets.items():
+        resolved = ref.resolve(env_name=f"[pipeline].{key}_env")
+        if resolved is not None:
+            env[_PIPELINE_SECRET_ENV[key]] = resolved
 
     # 维度一致性硬保证：container.py 启动会校验，这里早失败早清楚。
     if env["EMBED_DIMENSIONS"] != env["MILVUS_DENSE_DIM"]:

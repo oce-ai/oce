@@ -297,13 +297,53 @@ class RetrievalSettings(BaseSettings):
     # Intent classification (意图分类驱动的检索策略)
     intent_classification_enabled: bool = Field(
         default=True,
-        description="启用混合意图分类（规则 + hard signals + resolver）",
+        description="启用意图分类（判定表 + 可选的凭据配置判定源）",
         json_schema_extra={"tier": 2}
     )
-    intent_allow_llm: bool = Field(
-        default=False,
-        description="允许调用 LLM 提供 soft signals（默认关闭，纯规则模式省钱）",
+    # 概率判定源优先解析集中凭据；TypeSafe 专用配置和旧 LLM 环境配置兜底。
+    # 所有来源均无 key 时以纯规则运行，不发起 HTTP 请求。
+    intent_provider_enabled: bool = Field(
+        default=True,
+        description="允许调用集中凭据配置的意图判定源；无任何凭据时降级为纯规则",
         json_schema_extra={"tier": 2}
+    )
+    intent_provider_base_url: str = Field(
+        default="https://api.typesafe.ai",
+        description="TypeSafe System One 的 base URL（端点为 {base_url}/v1/systemone）",
+        json_schema_extra={"tier": 3}
+    )
+    intent_provider_api_key: SecretStr = Field(
+        default="",
+        description="TypeSafe API key 环境回落；优先使用 model_credentials 中的 intent 凭据",
+        json_schema_extra={"tier": 3}
+    )
+    intent_provider_model: str = Field(
+        default="jev-latest",
+        description="TypeSafe 模型别名",
+        json_schema_extra={"tier": 3}
+    )
+    # 秒级超时：一次真实 HTTP 往返需要的量级。旧实现把 50ms 硬编码在工厂里，
+    # 导致 provider 几乎必然超时、线上长期只跑规则。
+    intent_provider_timeout_seconds: float = Field(
+        default=3.0,
+        ge=0.1,
+        le=30.0,
+        description="意图判定源单次请求超时（秒）",
+        json_schema_extra={"tier": 3}
+    )
+    intent_provider_min_confidence: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="低于该置信度则不采纳判定源结论，退回判定表",
+        json_schema_extra={"tier": 3}
+    )
+    intent_provider_cache_size: int = Field(
+        default=1024,
+        ge=0,
+        le=65536,
+        description="意图判定结果的进程内缓存条数上限",
+        json_schema_extra={"tier": 3}
     )
 
 

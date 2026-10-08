@@ -116,10 +116,14 @@ from oce.shared.reports_read import VectorCollectionStat, VectorStoreStat
 
 
 class _CredentialRuntime:
-    def __init__(self, embedder, reranker, llm_clients=()) -> None:
+    def __init__(self, embedder, reranker, llm_clients=(), *, intent_provider=None) -> None:
         self._embedder = embedder
         self._reranker = reranker
         self._llm_clients = [client for client in llm_clients if client is not None]
+        self._intent_provider = intent_provider
+
+    def set_intent_provider(self, provider) -> None:
+        self._intent_provider = provider
 
     def set_llm_clients(self, llm_clients) -> None:
         """热重载换栈后同步 LLM client 覆盖面（llm_rerank 开关会增减 client）。
@@ -149,6 +153,12 @@ class _CredentialRuntime:
                 await client.reload()
             except Exception as exc:
                 logger.warning("LLM client reload failed: {}", exc)
+        intent_provider = self._intent_provider
+        if intent_provider is not None:
+            try:
+                await intent_provider.reload()
+            except Exception as exc:
+                logger.warning("intent provider reload failed: {}", type(exc).__name__)
         return pool_size
 
 
@@ -236,7 +246,8 @@ class Container:
         self._retrieval_stack = stack
 
         credential_runtime = _CredentialRuntime(
-            self.embedder, self.reranker, list(stack.llm_clients)
+            self.embedder, self.reranker, list(stack.llm_clients),
+            intent_provider=stack.intent_provider,
         )
 
         self.chunker = build_chunker(settings.chunking)
@@ -466,6 +477,7 @@ class Container:
             deps=retrieval_deps,
             query_bus=query_bus,
             credential_runtime=credential_runtime,
+            initial_stack=stack,
             on_swap=_on_swap,
         )
         command_bus.register(
@@ -515,6 +527,7 @@ class Container:
     async def close(self) -> None:
         if self.worker is not None:
             await self.worker.stop()
+        await self.reconfigurator.aclose()
         if self.resource_sampler is not None:
             await self.resource_sampler.stop()
         if self.monitoring_cleaner is not None:

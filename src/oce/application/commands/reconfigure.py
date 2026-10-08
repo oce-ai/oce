@@ -59,7 +59,7 @@ from oce.application.factories.retrieval import (
     build_retrieval_stack,
 )
 from oce.application.messages import Command, Query
-from oce.application.queries.search import SearchQuery
+from oce.application.queries.search import SearchQuery, SearchQueryHandler
 from oce.shared.config.settings import (
     LLMSettings,
     MilvusSettings,
@@ -88,8 +88,9 @@ class HotConfigError(ApplicationError):
 # 字段时不会自动变成可热改，必须经评审手动加入，避免把 L1/L2 参数误当 L0 扫。
 # ---------------------------------------------------------------------------
 
-# RetrievalSettings 的全部 21 个字段都是查询期 / 流水线装配旋钮（L0），经整栈重建均可
-# 正确生效，故全量纳入。唯一例外是 path_index_enabled 的「运行时开启」——见 apply 内的
+# RetrievalSettings 的非密钥字段是查询期 / 流水线装配旋钮（L0），经整栈重建均可
+# 正确生效。凭据通过 /admin/credentials 管理，不能进入日志或参数快照。
+# path_index_enabled 的「运行时开启」另受限制——见 apply 内的
 # 守卫：启动时关闭则 deps.path_index 为 None，热开拿到的仍是 None（静默无效），必须拒绝。
 HOT_RETRIEVAL_FIELDS: frozenset[str] = frozenset(
     {
@@ -120,7 +121,12 @@ HOT_RETRIEVAL_FIELDS: frozenset[str] = frozenset(
         # 路径索引 / 意图分类（门控，靠重建生效）
         "path_index_enabled",
         "intent_classification_enabled",
-        "intent_allow_llm",
+        "intent_provider_enabled",
+        "intent_provider_base_url",
+        "intent_provider_model",
+        "intent_provider_timeout_seconds",
+        "intent_provider_min_confidence",
+        "intent_provider_cache_size",
     }
 )
 
@@ -228,6 +234,7 @@ class RetrievalReconfigurator:
         deps: RetrievalDeps,
         query_bus: QueryBus,
         credential_runtime: Any,
+        initial_stack: RetrievalStack,
         on_swap: Callable[[RetrievalStack], None] | None = None,
     ) -> None:
         self._settings = settings
@@ -235,6 +242,8 @@ class RetrievalReconfigurator:
         self._query_bus = query_bus
         self._credential_runtime = credential_runtime
         self._on_swap = on_swap
+        self._stack = initial_stack
+        self._retired_handlers: set[SearchQueryHandler] = set()
         self._generation = 0
         self._apply_lock = asyncio.Lock()
 
@@ -247,6 +256,13 @@ class RetrievalReconfigurator:
             generation=self._generation,
             effective=_build_effective(self._settings),
         )
+
+    async def aclose(self) -> None:
+        await asyncio.gather(
+            self._stack.handler.aclose(),
+            *(handler.aclose() for handler in self._retired_handlers),
+        )
+        self._retired_handlers.clear()
 
     async def apply(self, command: ReconfigureRetrievalCommand) -> ReconfigureResult:
         """串行执行完整事务，避免两个带 await 的重配置基于同一旧快照互相覆盖。"""
@@ -358,6 +374,9 @@ class RetrievalReconfigurator:
         self._query_bus.register(SearchQuery, new_stack.handler)
         # 同步 credential runtime 的 LLM client 覆盖面（llm_rerank 开关会增减 client）。
         self._credential_runtime.set_llm_clients(new_stack.llm_clients)
+        self._credential_runtime.set_intent_provider(new_stack.intent_provider)
+        old_handler = self._stack.handler
+        self._stack = new_stack
         if self._on_swap is not None:
             self._on_swap(new_stack)
 
@@ -370,6 +389,13 @@ class RetrievalReconfigurator:
             dict(command.milvus_patch),
             dict(command.rerank_patch),
         )
+        self._retired_handlers = {
+            handler for handler in self._retired_handlers if not handler.closed
+        }
+        self._retired_handlers.add(old_handler)
+        await old_handler.retire()
+        if old_handler.closed:
+            self._retired_handlers.discard(old_handler)
         return ReconfigureResult(
             generation=self._generation,
             effective=_build_effective(live),

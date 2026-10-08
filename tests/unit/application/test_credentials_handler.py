@@ -1,6 +1,7 @@
 """Embedding credential command tests."""
 
 import pytest
+from unittest.mock import AsyncMock
 
 from oce.application.commands.credentials import (
     ReloadEmbeddingCredentialsCommand,
@@ -71,3 +72,23 @@ async def test_combined_reload_keeps_both_delegates_when_prepare_fails():
     assert embedder.activated is False
     assert embedder.discarded is True
     assert reranker.activated is False
+
+
+async def test_reload_refreshes_current_intent_provider_after_stack_swap():
+    class Runtime:
+        async def prepare_reload(self):
+            return object()
+
+        async def activate_prepared(self, replacement):
+            return 1
+
+    old_provider = AsyncMock()
+    new_provider = AsyncMock()
+    runtime = _CredentialRuntime(Runtime(), Runtime(), intent_provider=old_provider)
+    await runtime.reload()
+    old_provider.reload.assert_awaited_once()
+
+    runtime.set_intent_provider(new_provider)
+    await runtime.reload()
+    old_provider.reload.assert_awaited_once()
+    new_provider.reload.assert_awaited_once()

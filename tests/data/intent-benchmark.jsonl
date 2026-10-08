@@ -1,0 +1,96 @@
+{"id": "S01", "query": "UserService 在哪里定义？", "label": "S", "origin": "benchmark-84"}
+{"id": "S02", "query": "Which file defines `build_chunker`?", "label": "S", "origin": "benchmark-84"}
+{"id": "S03", "query": "找到 RetrievalPipeline 的实现位置", "label": "S", "origin": "benchmark-84"}
+{"id": "S04", "query": "Where is QueryIntent declared?", "label": "S", "origin": "benchmark-84"}
+{"id": "S05", "query": "`source_priority_factor` 的源码在哪？", "label": "S", "origin": "benchmark-84"}
+{"id": "S06", "query": "What does `register_routes` register?", "label": "S", "origin": "benchmark-84"}
+{"id": "S07", "query": "`Container` 里面有哪些初始化内容？", "label": "S", "origin": "benchmark-84"}
+{"id": "S08", "query": "In which files is `get_strategy` used?", "label": "U", "origin": "benchmark-84"}
+{"id": "S09", "query": "查一下 IntentClassifier 都在哪些地方被引用", "label": "U", "origin": "benchmark-84"}
+{"id": "S10", "query": "Where is `create_user` implemented in user_service.py?", "label": "S", "origin": "benchmark-84"}
+{"id": "S11", "query": "`SearchQueryHandler` 是在哪个 .py 文件定义的？", "label": "S", "origin": "benchmark-84"}
+{"id": "S12", "query": "Show me the source of MyNamespace::CacheManager", "label": "S", "origin": "benchmark-84"}
+{"id": "C01", "query": "UserService 从 API 到数据库的完整调用链是什么？", "label": "C", "origin": "benchmark-84"}
+{"id": "C02", "query": "Show the full call chain for `create_user`.", "label": "C", "origin": "benchmark-84"}
+{"id": "C03", "query": "`RetrievalPipeline.search` 是怎么被触发并一路执行下去的？", "label": "C", "origin": "benchmark-84"}
+{"id": "C04", "query": "Trace the call path from `main` to `EmbedWorker.run`.", "label": "C", "origin": "benchmark-84"}
+{"id": "C05", "query": "从 `SearchQueryHandler` 到 Milvus 查询的调用过程", "label": "C", "origin": "benchmark-84"}
+{"id": "C06", "query": "How does `login` travel from the frontend handler to the backend service?", "label": "C", "origin": "benchmark-84"}
+{"id": "C07", "query": "`dispatch_event` 触发后会依次调用哪些函数？", "label": "C", "origin": "benchmark-84"}
+{"id": "C08", "query": "Trace `save_order` through validation, repository, and database.", "label": "C", "origin": "benchmark-84"}
+{"id": "C09", "query": "`process_payment` 的端到端执行路径", "label": "C", "origin": "benchmark-84"}
+{"id": "C10", "query": "How is `on_message` triggered and what does it call next?", "label": "C", "origin": "benchmark-84"}
+{"id": "C11", "query": "从 `api_search` 到 rerank 的完整 flow", "label": "C", "origin": "benchmark-84"}
+{"id": "C12", "query": "Explain how `handle_request` gets invoked and reaches `send_response`.", "label": "C", "origin": "benchmark-84"}
+{"id": "R01", "query": "怎么调用 `create_user`？", "label": "R", "origin": "benchmark-84"}
+{"id": "R02", "query": "How do I use `PathIndexClient`?", "label": "R", "origin": "benchmark-84"}
+{"id": "R03", "query": "`get_strategy` 的 API 怎么用？", "label": "R", "origin": "benchmark-84"}
+{"id": "R04", "query": "Show an example call to `embed_batch`.", "label": "R", "origin": "benchmark-84"}
+{"id": "R05", "query": "如何使用 `CoverageSelector`？", "label": "R", "origin": "benchmark-84"}
+{"id": "R06", "query": "What's the correct way to call `reload` on CredentialConfiguredLLMClient?", "label": "R", "origin": "benchmark-84"}
+{"id": "R07", "query": "`SearchStore.search` 需要传哪些参数？", "label": "R", "origin": "benchmark-84"}
+{"id": "R08", "query": "How should callers invoke `questions_from_json`?", "label": "R", "origin": "benchmark-84"}
+{"id": "R09", "query": "给我一个 `IntentClassifier.classify` 的调用示例", "label": "R", "origin": "benchmark-84"}
+{"id": "R10", "query": "How to use `RedisQueue.enqueue` from application code?", "label": "R", "origin": "benchmark-84"}
+{"id": "R11", "query": "`load_projector` 怎么调用", "label": "R", "origin": "benchmark-84"}
+{"id": "R12", "query": "What arguments do I pass to `rerank`?", "label": "R", "origin": "benchmark-84"}
+{"id": "P01", "query": "pyproject.toml 在哪里？", "label": "P", "origin": "benchmark-84"}
+{"id": "P02", "query": "Where is package.json?", "label": "P", "origin": "benchmark-84"}
+{"id": "P03", "query": "项目的配置文件在哪？", "label": "P", "origin": "benchmark-84"}
+{"id": "P04", "query": "Find the .env.example file.", "label": "P", "origin": "benchmark-84"}
+{"id": "P05", "query": "README.zh-CN.md 在哪个目录？", "label": "P", "origin": "benchmark-84"}
+{"id": "P06", "query": "Where is the Alembic config file?", "label": "P", "origin": "benchmark-84"}
+{"id": "P07", "query": "找到 docker-compose.yml", "label": "P", "origin": "benchmark-84"}
+{"id": "P08", "query": "Which directory contains tsconfig.json?", "label": "P", "origin": "benchmark-84"}
+{"id": "P09", "query": "日志配置 yaml 文件在哪里？", "label": "P", "origin": "benchmark-84"}
+{"id": "P10", "query": "Locate requirements.txt.", "label": "P", "origin": "benchmark-84"}
+{"id": "P11", "query": "Where is the main nginx.conf stored?", "label": "P", "origin": "benchmark-84"}
+{"id": "P12", "query": "查找所有 migration .sql 文件所在路径", "label": "P", "origin": "benchmark-84"}
+{"id": "F01", "query": "登录功能在哪里实现？", "label": "F", "origin": "benchmark-84"}
+{"id": "F02", "query": "用户注册逻辑是怎么处理的？", "label": "F", "origin": "benchmark-84"}
+{"id": "F03", "query": "Where is password reset implemented?", "label": "F", "origin": "benchmark-84"}
+{"id": "F04", "query": "退款逻辑在哪里？", "label": "F", "origin": "benchmark-84"}
+{"id": "F05", "query": "How is rate limiting handled?", "label": "F", "origin": "benchmark-84"}
+{"id": "F06", "query": "找一下查询重写功能的实现", "label": "F", "origin": "benchmark-84"}
+{"id": "F07", "query": "Where is file upload validation implemented?", "label": "F", "origin": "benchmark-84"}
+{"id": "F08", "query": "错误类型的定义在哪里？", "label": "F", "origin": "benchmark-84"}
+{"id": "F09", "query": "How does the application handle stale jobs?", "label": "F", "origin": "benchmark-84"}
+{"id": "F10", "query": "缓存失效逻辑在哪一块实现？", "label": "F", "origin": "benchmark-84"}
+{"id": "F11", "query": "Where is the retry behavior implemented?", "label": "F", "origin": "benchmark-84"}
+{"id": "F12", "query": "搜索结果去重是怎么做的？", "label": "F", "origin": "benchmark-84"}
+{"id": "O01", "query": "整个检索架构是怎么设计的？", "label": "O", "origin": "benchmark-84"}
+{"id": "O02", "query": "How does the authentication mechanism work?", "label": "O", "origin": "benchmark-84"}
+{"id": "O03", "query": "前后端的数据流是怎样的？", "label": "O", "origin": "benchmark-84"}
+{"id": "O04", "query": "Explain the event handling architecture.", "label": "O", "origin": "benchmark-84"}
+{"id": "O05", "query": "系统的状态管理机制是什么？", "label": "O", "origin": "benchmark-84"}
+{"id": "O06", "query": "How does background job scheduling work?", "label": "O", "origin": "benchmark-84"}
+{"id": "O07", "query": "embedding、检索和 rerank 整体是怎么协作的？", "label": "O", "origin": "benchmark-84"}
+{"id": "O08", "query": "Explain the application's dependency injection architecture.", "label": "O", "origin": "benchmark-84"}
+{"id": "O09", "query": "请求从前端到后端整体怎么交互？", "label": "O", "origin": "benchmark-84"}
+{"id": "O10", "query": "How is cache consistency maintained across the system?", "label": "O", "origin": "benchmark-84"}
+{"id": "O11", "query": "整个 worker 队列机制怎么运转？", "label": "O", "origin": "benchmark-84"}
+{"id": "O12", "query": "Describe the high-level persistence architecture.", "label": "O", "origin": "benchmark-84"}
+{"id": "M01", "query": "找出登录功能的实现，并说明密码重置逻辑", "label": "M", "origin": "benchmark-84"}
+{"id": "M02", "query": "Show where billing is handled and explain refund behavior.", "label": "M", "origin": "benchmark-84"}
+{"id": "M03", "query": "查找缓存实现，同时说明重试机制", "label": "M", "origin": "benchmark-84"}
+{"id": "M04", "query": "Find the upload validation logic plus the image processing behavior.", "label": "M", "origin": "benchmark-84"}
+{"id": "M05", "query": "说明用户注册和账号删除两套逻辑", "label": "M", "origin": "benchmark-84"}
+{"id": "M06", "query": "Where is search implemented and how is result deduplication handled?", "label": "M", "origin": "benchmark-84"}
+{"id": "M07", "query": "找出邮件发送逻辑以及通知重试逻辑", "label": "M", "origin": "benchmark-84"}
+{"id": "M08", "query": "Explain rate limiting and also locate the request validation logic.", "label": "M", "origin": "benchmark-84"}
+{"id": "M09", "query": "查询订单创建逻辑，并且说明取消订单是怎么处理的", "label": "M", "origin": "benchmark-84"}
+{"id": "M10", "query": "Find the feature-flag implementation as well as rollout behavior.", "label": "M", "origin": "benchmark-84"}
+{"id": "M11", "query": "说明数据库迁移机制，并分析备份恢复流程", "label": "M", "origin": "benchmark-84"}
+{"id": "M12", "query": "Where is session handling implemented, and how is logout handled?", "label": "M", "origin": "benchmark-84"}
+{"id": "D01", "query": "trace the call chain from the CLI entry to the index writer", "label": "C", "origin": "review-divergence"}
+{"id": "D02", "query": "在 src/oce/domain 目录下哪个文件实现了分块逻辑？", "label": "F", "origin": "review-divergence"}
+{"id": "D03", "query": "How do I call `build_index` and what does it return?", "label": "R", "origin": "review-divergence"}
+{"id": "D04", "query": "哪些文件引用了 `parse_config`？", "label": "U", "origin": "review-divergence"}
+{"id": "D05", "query": "找出 `parse_config` 的定义，并说明它的调用链路", "label": "M", "origin": "review-divergence"}
+{"id": "D06", "query": "In which files is `get_strategy` used?", "label": "U", "origin": "review-divergence"}
+{"id": "D07", "query": "`SearchStore.search` 的调用点都有哪些？", "label": "U", "origin": "review-divergence"}
+{"id": "D08", "query": "`parse_config` 在哪里定义？", "label": "S", "origin": "review-divergence"}
+{"id": "D09", "query": "`build_index` 的参数和返回值是什么？", "label": "R", "origin": "review-divergence"}
+{"id": "D10", "query": "检索结果的缓存一致性机制是怎么设计的？", "label": "O", "origin": "review-divergence"}
+{"id": "D11", "query": "config.json 在哪里？", "label": "P", "origin": "review-divergence"}
+{"id": "D12", "query": "登录失败重试的业务规则实现在哪里？", "label": "F", "origin": "review-divergence"}

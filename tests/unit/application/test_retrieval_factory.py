@@ -14,10 +14,11 @@ import pytest
 from oce.application.factories.retrieval import RetrievalDeps, build_retrieval_stack
 from oce.application.queries.search import SearchQueryHandler
 from oce.domain.services.retrieval import RetrievalPipeline
-from oce.domain.services.llm.intent import HybridIntentClassifier, HeuristicIntentClassifier, IntentClassifier
+from oce.domain.services.intent.resolver import IntentResolver
 from oce.domain.services.reranker import NoopReranker
 from oce.domain.services.selector.coverage_selector import CoverageSelector
 from oce.infrastructure.persistence.symbol_search_store import SymbolSearchStore
+from oce.infrastructure.intent.credential_provider import CredentialConfiguredIntentProvider
 from oce.shared.config.settings import LLMSettings, RetrievalSettings, Settings
 from oce.shared.metrics import NoopMetricsSink
 
@@ -141,35 +142,53 @@ class TestComponentGating:
         # 全关 → 不构造任何 LLM client（避免 /admin/credentials/reload 多出无谓 DB 查询）
         assert stack.llm_clients == ()
 
-    def test_hybrid_classifier_builds_without_llm_by_default(self):
+    def test_provider_resolves_credentials_lazily_without_environment_key(self):
+        """环境 key 为空也不能摘掉 DB 凭据；构造期不查询数据库或连接网络。"""
         settings = _settings(
             intent_classification_enabled=True,
-            intent_allow_llm=False,
+            intent_provider_enabled=True,
+            intent_provider_api_key="",
         )
-        stack = build_retrieval_stack(settings, _deps())
-        assert isinstance(stack.pipeline.intent_classifier, HybridIntentClassifier)
-        assert stack.pipeline.intent_classifier.soft_provider is None
+        def session_factory():
+            raise AssertionError("construction must not resolve credentials")
+
+        stack = build_retrieval_stack(settings, _deps(session_factory=session_factory))
+        resolver = stack.pipeline.intent_classifier
+        assert isinstance(resolver, IntentResolver)
+        assert isinstance(resolver.provider, CredentialConfiguredIntentProvider)
+        assert resolver.provider is stack.intent_provider
+        # 判定源使用自己的凭据重载和生命周期入口。
         assert stack.llm_clients == ()
 
-    def test_hybrid_classifier_blocks_legacy_alibaba_endpoint(self):
-        settings = Settings(
-            llm=LLMSettings(
-                rerank_enabled=False,
-                api_key="k",
-                model="m",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            ),
+    def test_resolver_builds_provider_when_api_key_present(self):
+        settings = _settings(
+            intent_classification_enabled=True,
+            intent_provider_enabled=True,
+            intent_provider_api_key="test-key-not-a-real-credential",
         )
-        retrieval = settings.retrieval.model_copy(
-            update={
-                "intent_classification_enabled": True,
-                "intent_allow_llm": True,
-            }
-        )
-        stack = build_retrieval_stack(settings.model_copy(update={"retrieval": retrieval}), _deps())
-        assert isinstance(stack.pipeline.intent_classifier, HybridIntentClassifier)
-        assert stack.pipeline.intent_classifier.soft_provider is None
+        stack = build_retrieval_stack(settings, _deps())
+        resolver = stack.pipeline.intent_classifier
+        assert isinstance(resolver, IntentResolver)
+        assert resolver.provider is not None
+        # 判定源走自己的 HTTP 适配器，不占用 LLM client 列表
         assert stack.llm_clients == ()
+
+    def test_provider_can_be_disabled_explicitly(self):
+        settings = _settings(
+            intent_classification_enabled=True,
+            intent_provider_enabled=False,
+            intent_provider_api_key="test-key-not-a-real-credential",
+        )
+        stack = build_retrieval_stack(settings, _deps())
+        assert stack.pipeline.intent_classifier.provider is None
+
+    def test_min_confidence_comes_from_settings(self):
+        settings = _settings(
+            intent_classification_enabled=True,
+            intent_provider_min_confidence=0.75,
+        )
+        stack = build_retrieval_stack(settings, _deps())
+        assert stack.pipeline.intent_classifier.min_confidence == 0.75
 
     def test_query_rewriter_built_when_enabled(self):
         settings = _settings(query_rewrite_enabled=True)

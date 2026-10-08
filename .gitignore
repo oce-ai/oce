@@ -36,4 +36,7 @@ bench/runs/*
 *local_demo
 
 data
+!tests/data/
+tests/data/*
+!tests/data/intent-benchmark.jsonl
 logs

@@ -20,18 +20,14 @@ from typing import Callable, Iterator
 from loguru import logger
 
 from oce.domain.services.embedder import Embedder
-from oce.domain.services.llm.intent import IntentClassifier, QueryIntent
+from oce.domain.services.intent.resolver import IntentResolver, resolve_rules
+from oce.domain.services.intent.signals import extract_symbols, split_independent_clauses
+from oce.domain.services.intent.taxonomy import QueryIntent
 from oce.domain.services.path_search import PathSearchStore
-from oce.domain.services.query_classifier import (
-    QueryIntent as HeuristicQueryIntent,
-    classify_query_intent,
-    extract_code_identifiers,
-    should_use_path_index,
-    split_independent_clauses,
-)
+from oce.domain.services.query_classifier import should_use_path_index
 from oce.domain.services.query_planner import HeuristicQueryPlanner, QueryPlanner
 from oce.domain.services.reranker import NoopReranker, Reranker
-from oce.domain.services.retrieval_strategy import get_strategy
+from oce.domain.services.retrieval_strategy import RetrievalStrategy, get_strategy
 from oce.domain.services.search import ExactSearchStore, SearchHit, SearchStore, search_hit_key
 from oce.domain.services.selector.coverage_selector import CoverageSelector
 from oce.domain.services.selector.protocols import Selector
@@ -44,11 +40,6 @@ try:
     from oce.domain.services.llm.reranker import LLMReranker
 except ImportError:
     LLMReranker = None  # type: ignore
-
-
-def _heuristic_to_llm_intent(intent: HeuristicQueryIntent) -> QueryIntent:
-    """启发式意图 → LLM 意图枚举，供 get_strategy 派发；两者成员名一一对应。"""
-    return QueryIntent[intent.name]
 
 
 @contextmanager
@@ -117,7 +108,7 @@ class RetrievalPipeline:
         query_planner: QueryPlanner | None = None,
         priority_factor: Callable[[str], float] | None = None,
         settings: RetrievalSettings | None = None,
-        intent_classifier: IntentClassifier | None = None,  # 意图分类器
+        intent_classifier: IntentResolver | None = None,  # 意图判定器
     ) -> None:
         self.embedder = embedder
         self.store = store
@@ -137,10 +128,15 @@ class RetrievalPipeline:
             ),
             min_facet_chars=self.settings.query_min_facet_chars,
         )
-        self.selector = selector or CoverageSelector(
-            max_per_path=self.settings.max_chunks_per_path,
-            max_chars=self.settings.max_context_chars,
-            overlap_threshold=self.settings.overlap_threshold,
+        self._has_custom_selector = selector is not None
+        self.selector = (
+            selector
+            if selector is not None
+            else CoverageSelector(
+                max_per_path=self.settings.max_chunks_per_path,
+                max_chars=self.settings.max_context_chars,
+                overlap_threshold=self.settings.overlap_threshold,
+            )
         )
 
     async def search(
@@ -176,31 +172,23 @@ class RetrievalPipeline:
         if self.intent_classifier is not None:
             try:
                 with stage("intent"):
-                    classify_with_decision = getattr(
-                        self.intent_classifier, "classify_with_decision", None
-                    )
-                    if classify_with_decision is not None:
-                        detected_intent, intent_decision = await classify_with_decision(query)
-                    else:
-                        detected_intent = await self.intent_classifier.classify(query)
+                    intent_decision = await self.intent_classifier.resolve(query)
+                    detected_intent = intent_decision.intent
             except Exception as e:
-                # LLM 意图分类失败（未配 key、超时、限流等）回退启发式分类，
-                # 不让单次检索因 LLM 不可用而崩溃；启发式为纯正则，恒定可用。
+                # 判定器内部已对 provider 故障做降级，这里只兜住真正的意外
+                # 异常；纯规则判定为本地正则，恒定可用。
                 logger.warning(
-                    f"LLM intent classification failed: {e}, falling back to heuristic"
+                    f"Intent resolution failed: {e}, falling back to rules-only"
                 )
-                detected_intent = _heuristic_to_llm_intent(classify_query_intent(query))
-                intent_decision = None
+                intent_decision = resolve_rules(query)
+                detected_intent = intent_decision.intent
             strategy = get_strategy(detected_intent)
             logger.debug(f"Query intent: {detected_intent.value}, strategy: {strategy}")
         if audit is not None and detected_intent is not None:
             audit.intent = detected_intent.value
             if intent_decision is not None:
-                audit.intent_source = getattr(intent_decision, "source", None)
-                audit.intent_decision_reason = getattr(intent_decision, "reason", None)
-            else:
-                audit.intent_source = "fallback" if self.intent_classifier is not None else "heuristic"
-                audit.intent_decision_reason = "classifier_compatibility_path"
+                audit.intent_source = intent_decision.source
+                audit.intent_decision_reason = intent_decision.reason
 
         # 路径索引增强：根据意图或启发式判断
         use_path_index = (
@@ -223,6 +211,7 @@ class RetrievalPipeline:
                     if strategy is not None
                     else self.llm_reranker is not None
                 ),
+                selector=self._selector_for(strategy),
                 audit=audit,
             )
 
@@ -239,11 +228,16 @@ class RetrievalPipeline:
             if rewritten_queries:
                 queries_to_search = rewritten_queries
 
-        # 复合查询拆分：检测器（与意图分类共用同一套连接词/任务谓词/守卫）
-        # 判定为独立复合时，把子查询加入检索列表，每路子查询独立规划/召回/
-        # 融合；原查询保留，召回不缩水。检测器驱动而非标签驱动：heuristic
-        # 分类器没有 M 分支，hybrid 模式的 soft provider 也可能缺席。
-        compound_parts = split_independent_clauses(query)
+        # 复合查询拆分：M 意图的实质差异。策略表里只有 COMPOUND 的
+        # ``split_clauses`` 为真，这正是 M 区别于 F 的地方。
+        # 未启用意图分类时（strategy is None）退回检测器驱动，保持旧行为，
+        # 否则关掉意图分类会连带丢掉复合召回。
+        use_clause_split = (
+            strategy.split_clauses if strategy is not None else True
+        )
+        compound_parts = (
+            split_independent_clauses(query) if use_clause_split else [query]
+        )
         if len(compound_parts) >= 2:
             known = set(queries_to_search)
             queries_to_search.extend(
@@ -296,8 +290,32 @@ class RetrievalPipeline:
 
         with stage("select"):
             hits = self._apply_confidence_floor(hits)
-            selected = await self.selector.select(hits, self.settings.final_select_k)
+            selector = self._selector_for(strategy)
+            selected = await selector.select(hits, self.settings.final_select_k)
         return selected
+
+    def _selector_for(self, strategy: RetrievalStrategy | None) -> Selector:
+        """按意图返回选择器；预算与默认一致时复用共享实例。
+
+        显式注入的选择器拥有选择策略；意图预算只调整默认 CoverageSelector。
+        默认选择器在预算不同时才新建，避免每次请求都分配对象。
+
+        ``prefer_breadth`` 是 U（引用点）的实质差异：引用点要跨文件铺开，
+        单文件上限压到 1，防止一个文件吃掉整个预算。
+        """
+        if strategy is None or self._has_custom_selector:
+            return self.selector
+
+        max_per_path = strategy.max_chunks_per_path
+        if strategy.prefer_breadth:
+            max_per_path = 1
+        if max_per_path == self.settings.max_chunks_per_path:
+            return self.selector
+        return CoverageSelector(
+            max_per_path=max_per_path,
+            max_chars=self.settings.max_context_chars,
+            overlap_threshold=self.settings.overlap_threshold,
+        )
 
     async def _llm_rerank_hits(
         self, query: str, hits: list[SearchHit]
@@ -369,7 +387,7 @@ class RetrievalPipeline:
                 scope_limit,
             )
             return []
-        identifiers = extract_code_identifiers(query)
+        identifiers = extract_symbols(query)
         if not identifiers:
             return []
         try:
@@ -392,7 +410,7 @@ class RetrievalPipeline:
         *,
         intent: QueryIntent | None = None,
     ) -> list[SearchHit]:
-        effective_intent = intent or _heuristic_to_llm_intent(classify_query_intent(query))
+        effective_intent = intent or resolve_rules(query).intent
         if (
             effective_intent == QueryIntent.CALL_CHAIN
             and semantic_hits
@@ -442,7 +460,7 @@ class RetrievalPipeline:
         intent: QueryIntent | None = None,
     ) -> list[SearchHit]:
         """符号定位时，框架 endpoint 定义稳定优先于同名内部实现。"""
-        effective_intent = intent or _heuristic_to_llm_intent(classify_query_intent(query))
+        effective_intent = intent or resolve_rules(query).intent
         if effective_intent != QueryIntent.SYMBOL:
             return hits
         location_markers = (
@@ -460,7 +478,7 @@ class RetrievalPipeline:
         )
         if not any(marker in query.casefold() for marker in location_markers):
             return hits
-        identifiers = extract_code_identifiers(query)
+        identifiers = extract_symbols(query)
         if not identifiers:
             return hits
 
@@ -543,6 +561,7 @@ class RetrievalPipeline:
         *,
         enable_query_rewrite: bool,
         enable_llm_rerank: bool,
+        selector: Selector,
         audit: RetrievalAudit | None = None,
     ) -> list[SearchHit]:
         """
@@ -632,7 +651,7 @@ class RetrievalPipeline:
 
         with stage("select"):
             hits = self._apply_confidence_floor(hits, priority_factor=path_query_priority_factor)
-            selected = await self.selector.select(hits, self.settings.final_select_k)
+            selected = await selector.select(hits, self.settings.final_select_k)
         return selected
 
     async def _merge_path_and_content(

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock
+
 import pytest
 
 from oce.application.queries.search import SearchQuery, SearchQueryHandler
@@ -50,3 +53,58 @@ class TestSearchQueryHandler:
         await search_handler.handle(SearchQuery(query="q"))
 
         assert store.last_kwargs["allowed_blob_names"] is None
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_retirement_drains_old_requests_before_closing_resources(fails):
+    class BlockingPipeline:
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def search(self, *args):
+            self.started.set()
+            await self.release.wait()
+            if fails:
+                raise RuntimeError("search failed")
+            return []
+
+    pipeline = BlockingPipeline()
+    close = AsyncMock()
+    handler = SearchQueryHandler(pipeline, on_close=close)
+    request = asyncio.create_task(handler.handle(SearchQuery("q")))
+    await pipeline.started.wait()
+    await handler.retire()
+    close.assert_not_awaited()
+
+    shutdown = asyncio.create_task(handler.aclose())
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    pipeline.release.set()
+    if fails:
+        with pytest.raises(RuntimeError, match="search failed"):
+            await request
+    else:
+        assert (await request).hits == []
+    await shutdown
+    await handler.aclose()
+    close.assert_awaited_once()
+
+
+async def test_cancelled_request_releases_retired_resources():
+    started = asyncio.Event()
+
+    class BlockingPipeline:
+        async def search(self, *args):
+            started.set()
+            await asyncio.Event().wait()
+
+    close = AsyncMock()
+    handler = SearchQueryHandler(BlockingPipeline(), on_close=close)
+    request = asyncio.create_task(handler.handle(SearchQuery("q")))
+    await started.wait()
+    await handler.retire()
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    await handler.aclose()
+    close.assert_awaited_once()

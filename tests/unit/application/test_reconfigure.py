@@ -63,9 +63,13 @@ class _FakeCredentialRuntime:
 
     def __init__(self) -> None:
         self.set_clients_calls: list[tuple] = []
+        self.intent_provider = None
 
     def set_llm_clients(self, clients) -> None:
         self.set_clients_calls.append(tuple(clients))
+
+    def set_intent_provider(self, provider) -> None:
+        self.intent_provider = provider
 
     async def reload(self) -> int:
         return 0
@@ -126,6 +130,7 @@ def _harness(
         deps=deps,
         query_bus=query_bus,
         credential_runtime=runtime,
+        initial_stack=initial,
     )
     return reconfigurator, query_bus, settings, deps, runtime, reranker
 
@@ -385,13 +390,45 @@ class TestSuccessfulApply:
 
     async def test_effective_excludes_secrets(self):
         """effective 快照绝不带任何密钥字段。"""
-        rec, _, _, _, _, _ = _harness()
+        secret = "fake-intent-key-for-test-1234"
+        rec, _, _, _, _, _ = _harness(
+            settings=_settings(intent_provider_api_key=secret)
+        )
         result = await rec.apply(
             ReconfigureRetrievalCommand(rerank_patch={"top_n": 4})
         )
         flat = repr(result.effective)
         assert "api_key" not in result.effective["rerank"]
+        assert "intent_provider_api_key" not in result.effective["retrieval"]
+        assert secret not in flat
         assert "SecretStr" not in flat
+        from oce.api.schemas import RetrievalConfigEffective
+        from oce.bench.runrecord import ParamSnapshot
+        import json
+
+        assert secret not in RetrievalConfigEffective(**result.effective).model_dump_json()
+        assert secret not in json.dumps(ParamSnapshot(effective=result.effective).to_dict())
+
+    async def test_intent_key_patch_rejected_without_logging_or_mutation(self):
+        from io import StringIO
+        from loguru import logger
+
+        rec, bus, _, _, _, _ = _harness()
+        old_handler = bus._handlers[SearchQuery]
+        secret = "fake-rejected-intent-key-1234"
+        output = StringIO()
+        sink = logger.add(output)
+        try:
+            with pytest.raises(HotConfigError) as error:
+                await rec.apply(ReconfigureRetrievalCommand(
+                    retrieval_patch={"intent_provider_api_key": secret}
+                ))
+        finally:
+            logger.remove(sink)
+        assert error.value.code == "HOT_CONFIG_UNKNOWN_FIELD"
+        assert secret not in repr(error.value.details)
+        assert secret not in output.getvalue()
+        assert bus._handlers[SearchQuery] is old_handler
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +437,52 @@ class TestSuccessfulApply:
 
 
 class TestInFlightIsolation:
+    async def test_swap_preserves_active_intent_provider_until_search_completes(self, monkeypatch):
+        from unittest.mock import AsyncMock
+        from oce.application.container import Container
+        from oce.domain.services.intent.port import IntentPrediction
+        from oce.domain.services.intent.taxonomy import QueryIntent
+
+        providers = []
+
+        class Provider:
+            def __init__(self, *args, **kwargs):
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+                self.aclose = AsyncMock()
+                providers.append(self)
+
+            async def predict(self, query):
+                self.started.set()
+                await self.release.wait()
+                return IntentPrediction(intent=QueryIntent.FEATURE, confidence=1.0)
+
+        monkeypatch.setattr(
+            "oce.application.factories.retrieval.CredentialConfiguredIntentProvider", Provider
+        )
+        rec, bus, _, _, runtime, _ = _harness(settings=_settings(
+            intent_classification_enabled=True, intent_provider_enabled=True
+        ))
+        request = asyncio.create_task(bus.ask(SearchQuery(query="abstract request")))
+        await providers[0].started.wait()
+        await rec.apply(ReconfigureRetrievalCommand(retrieval_patch={"default_top_k": 17}))
+        assert runtime.intent_provider is providers[1]
+        providers[0].aclose.assert_not_awaited()
+
+        # Exercise the production container shutdown path without external services.
+        container = Container.__new__(Container)
+        container.reconfigurator = rec
+        container.worker = container.resource_sampler = container.monitoring_cleaner = None
+        container.metrics = container.search_store = container.embedder = container.reranker = AsyncMock()
+        shutdown = asyncio.create_task(container.close())
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        providers[0].release.set()
+        await request
+        await shutdown
+        providers[0].aclose.assert_awaited_once()
+        providers[1].aclose.assert_awaited_once()
+
     async def test_old_handler_reference_survives_swap(self):
         rec, bus, settings, _, _, _ = _harness()
         # 模拟一个已进入 ask() 的请求：第一行取到 handler 引用

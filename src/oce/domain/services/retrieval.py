@@ -246,7 +246,7 @@ class RetrievalPipeline:
             if audit is not None:
                 audit.compound_parts = compound_parts
             logger.info(
-                "Compound query split into %d retrieval branches",
+                "Compound query split into {} retrieval branches",
                 len(queries_to_search),
             )
 

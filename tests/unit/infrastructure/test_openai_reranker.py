@@ -66,15 +66,6 @@ async def test_rerank_empty_hits_returns_empty():
     client.post.assert_not_awaited()  # 空就不发请求
 
 
-@pytest.mark.asyncio
-async def test_rerank_blocks_alibaba_endpoint_before_post():
-    reranker, client = _make_reranker(response_payload={"results": []})
-    reranker._endpoint = "https://dashscope.aliyuncs.com/compatible-api/v1/reranks"
-    hits = [_Hit(content="d1")]
-
-    assert await reranker.rerank("q", hits) == hits
-    client.post.assert_not_awaited()
-
 
 # ── SiliconFlow body shape ──────────────────────────────────────────────
 

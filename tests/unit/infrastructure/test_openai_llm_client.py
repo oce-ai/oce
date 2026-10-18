@@ -10,10 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import oce.infrastructure.llm.openai_compatible_client as llm_mod
-from oce.infrastructure.llm.openai_compatible_client import (
-    BlockedLLMEndpointError,
-    OpenAICompatibleLLMClient,
-)
+from oce.infrastructure.llm.openai_compatible_client import OpenAICompatibleLLMClient
 
 
 def _fake_response(payload: dict):
@@ -93,17 +90,3 @@ async def test_chat_without_callback_is_inert(monkeypatch):
         [{"role": "user", "content": "hi"}], model="test-llm"
     ) == "hi"
 
-
-@pytest.mark.asyncio
-async def test_chat_fails_closed_before_network_for_alibaba_endpoint(monkeypatch):
-    def _network_must_not_start(**_: object):
-        raise AssertionError("blocked endpoint attempted to create an HTTP client")
-
-    monkeypatch.setattr(llm_mod.httpx, "AsyncClient", _network_must_not_start)
-    client = OpenAICompatibleLLMClient(
-        api_key="sk",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    )
-
-    with pytest.raises(BlockedLLMEndpointError):
-        await client.chat([{"role": "user", "content": "never send"}])

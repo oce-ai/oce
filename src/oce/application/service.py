@@ -61,6 +61,7 @@ from oce.application.queries.status import (
 from oce.domain.services.formatter import format_retrieval
 from oce.domain.services.search import SearchHit
 from oce.shared.metrics_read import MonitoringStats
+from oce.shared.usage import collect_usage
 from oce.shared.reports_read import (
     ApiCallsReport,
     IndexInventoryReport,
@@ -95,6 +96,8 @@ class RetrievalResult:
     hits: tuple[SearchHit, ...]
     formatted_retrieval: str
     elapsed_ms: int
+    # 本次检索的计费 token 总数（embed/rerank 直加，LLM 按 input + 4*output）
+    total_tokens: int = 0
 
 
 class RetrievalApplication:
@@ -184,15 +187,17 @@ class RetrievalApplication:
         started = time.perf_counter()
         added = tuple(added_blobs or ())
         deleted = tuple(deleted_blobs or ())
-        scope = await self._prepare_scope(checkpoint_id, added, deleted)
-        result = await self._queries.ask(
-            SearchQuery(information_request, scope.blob_names, source="retrieval")
-        )
+        with collect_usage() as usage:
+            scope = await self._prepare_scope(checkpoint_id, added, deleted)
+            result = await self._queries.ask(
+                SearchQuery(information_request, scope.blob_names, source="retrieval")
+            )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         return RetrievalResult(
             hits=tuple(result.hits),
             formatted_retrieval=format_retrieval(result.hits),
             elapsed_ms=elapsed_ms,
+            total_tokens=usage.total_tokens,
         )
 
     async def _prepare_scope(

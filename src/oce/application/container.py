@@ -113,6 +113,7 @@ from oce.shared.database.session import get_session_factory
 from oce.shared.logging import DATA_DIR_ENV
 from oce.shared.metrics import NoopMetricsSink, TokenUsageRecord
 from oce.shared.reports_read import VectorCollectionStat, VectorStoreStat
+from oce.shared.usage import record_usage
 
 
 class _CredentialRuntime:
@@ -170,10 +171,10 @@ class Container:
         if settings.embedding.dimensions != settings.milvus.dense_dim:
             raise ValueError("EMBED_DIMENSIONS must equal MILVUS_DENSE_DIM")
 
-        # token 用量回调：监控开启时把 embedder/reranker/llm 的真实 usage 桥接到 sink，
-        # 关闭时传 None，采集侧 if 判空直接跳过（零开销）。
+        # token 用量回调：恒注入。先记进当前请求的计费账本（供检索接口返回总数），
+        # 再桥接到 sink；监控关闭时 sink 是 Noop，写入即空操作。
         monitoring = settings.monitoring
-        token_usage_cb = self._record_token_usage if monitoring.enabled else None
+        token_usage_cb = self._record_token_usage
 
         embedding_key = (
             settings.embedding.api_key.get_secret_value()
@@ -510,6 +511,9 @@ class Container:
         credential_id=0（无凭证，如 LLM）归一为 None；旁路容错：任何异常只记日志，
         绝不抛回主链路。
         """
+        # 先记进请求账本（不在 collect_usage() 作用域内时是空操作）：
+        # 响应里的计费总数只依赖这里，与监控开关、sink 落库时机无关。
+        record_usage(kind, prompt_tokens, completion_tokens)
         try:
             self.metrics.record_token_usage(
                 TokenUsageRecord(

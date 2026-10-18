@@ -93,6 +93,7 @@ async def codebase_retrieval(
     return CodebaseRetrievalResponse(
         formatted_retrieval=result.formatted_retrieval,
         codebase_retrieval_elapsed_ms=result.elapsed_ms,
+        codebase_retrieval_total_tokens=result.total_tokens,
     )
 
 

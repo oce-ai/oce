@@ -17,6 +17,7 @@ from oce.application.queries.status import (
 )
 from oce.application.service import BlobUpload, RetrievalApplication, compute_blob_name
 from oce.domain.services.search import SearchHit
+from oce.shared.usage import record_usage
 
 
 class SpyCommandBus:
@@ -148,3 +149,24 @@ async def test_batch_upload_without_checkpoint_id_skips_checkpoint():
     await application.batch_upload([BlobUpload("src/a.py", "print(1)\n")])
 
     assert not any(isinstance(c, CheckpointCommand) for c in commands.commands)
+
+
+async def test_retrieve_reports_billed_token_total():
+    """计费总数 = embed/rerank 直加 + LLM 的 input + 4*output。"""
+
+    class UsageQueries(SpyQueryBus):
+        async def ask(self, query):
+            self.queries.append(query)
+            if isinstance(query, ResolveScopeQuery):
+                return ResolveScopeResult(frozenset({"blob-a"}))
+            if isinstance(query, SearchQuery):
+                record_usage("embed", 100, 0)
+                record_usage("query_rewrite", 50, 10)
+                return SimpleNamespace(hits=[])
+            raise AssertionError(f"Unexpected query: {query!r}")
+
+    application = RetrievalApplication(SpyCommandBus(), UsageQueries())
+
+    result = await application.retrieve("entry point")
+
+    assert result.total_tokens == 100 + 50 + 4 * 10

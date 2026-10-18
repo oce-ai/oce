@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import Context
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urlparse
@@ -17,6 +18,7 @@ from oce.infrastructure.intent.typesafe_provider import TypeSafeIntentProvider
 from oce.infrastructure.llm.openai_compatible_client import OpenAICompatibleLLMClient, UsageCallback
 from oce.infrastructure.persistence.models import ModelCredentialModel
 from oce.shared.config.settings import LLMSettings, RetrievalSettings
+from oce.shared.usage import record_usage
 
 
 @dataclass(frozen=True)
@@ -194,7 +196,13 @@ class CredentialConfiguredIntentProvider:
         return OpenAIIntentProvider(client, model=config.model, timeout_seconds=config.timeout_seconds)
 
     async def _record_usage(self, credential_id: int, kind: str, model: str, prompt: int, completion: int) -> None:
-        task = asyncio.create_task(self._report_usage(credential_id, kind, model, prompt, completion))
+        # 先同步落账：sink 上报是 fire-and-forget，晚于请求结束会漏进计费总数。
+        record_usage(kind, prompt, completion)
+        # 上报 task 用空 context 启动：否则容器回调会再记一次，intent 用量翻倍。
+        task = asyncio.create_task(
+            self._report_usage(credential_id, kind, model, prompt, completion),
+            context=Context(),
+        )
         self._usage_tasks.add(task)
         task.add_done_callback(self._usage_tasks.discard)
 

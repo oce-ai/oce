@@ -46,7 +46,7 @@ class StubApplication:
             start_line=3,
             end_line=3,
         )
-        return RetrievalResult((hit,), "formatted", 12)
+        return RetrievalResult((hit,), "formatted", 12, 42)
 
     async def checkpoint(self, **kwargs):
         return SimpleNamespace(new_checkpoint_id="abc:1")
@@ -226,6 +226,7 @@ async def test_codebase_retrieval_contract():
     assert retrieval.json() == {
         "formatted_retrieval": "formatted",
         "codebase_retrieval_elapsed_ms": 12,
+        "codebase_retrieval_total_tokens": 42,
     }
 
 

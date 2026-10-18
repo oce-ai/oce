@@ -97,6 +97,8 @@ class CodebaseRetrievalRequest(BaseModel):
 class CodebaseRetrievalResponse(BaseModel):
     formatted_retrieval: str
     codebase_retrieval_elapsed_ms: int
+    # 本次检索的计费 token 总数：embed/rerank 直接相加，LLM 按 input + 4*output
+    codebase_retrieval_total_tokens: int = 0
 
 
 class CheckpointBlobsRequest(BaseModel):

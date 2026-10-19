@@ -85,3 +85,12 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  docker:
+    name: build (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Exercise the same Dockerfile used by the release workflow before tagging.
+      - name: Build Docker image
+        run: docker build --tag oce:ci .

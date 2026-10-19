@@ -9,12 +9,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install dependencies first so source changes do not invalidate the dependency layer.
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY alembic.ini ./
 # 迁移脚本位于 src/oce/alembic，随 src 一并拷贝
 COPY src ./src
+
+# Hatchling force-include sources required to build the local project.
+COPY bench/datasets ./bench/datasets
+COPY bench/profiles/local.toml ./bench/profiles/local.toml
+COPY bench/profiles/docker.example.toml ./bench/profiles/docker.example.toml
+COPY bench/profiles/sweep_topk.example.toml ./bench/profiles/sweep_topk.example.toml
 
 RUN uv sync --locked --no-dev
 

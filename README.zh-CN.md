@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="assets/opencontextengine-logo.svg" alt="OpenContextEngine" width="75%"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/oce-readme-banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/brand/oce-readme-banner-light.svg">
+  <img src="assets/brand/oce-readme-banner-light.svg" alt="OpenContextEngine" width="100%"/>
+</picture>
 
 # OpenContextEngine
 

@@ -1,13 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">OpenContextEngine mark</title>
-  <desc id="desc">An open code bracket enclosing layered context lines and a retrieval marker.</desc>
-
-  <rect x="12" y="12" width="196" height="196" rx="46" fill="#0B1220"/>
-  <path d="M84 48H69c-14 0-25 11-25 25v74c0 14 11 25 25 25h15"
-        fill="none" stroke="#19B7B5" stroke-width="15" stroke-linecap="round"/>
-  <path d="M136 48h15c14 0 25 11 25 25v74c0 14-11 25-25 25h-15"
-        fill="none" stroke="#FF806B" stroke-width="15" stroke-linecap="round"/>
-  <path d="M77 81h63M77 99h47M77 117h32"
-        fill="none" stroke="#F7FAFC" stroke-width="9" stroke-linecap="round"/>
-  <circle cx="148" cy="117" r="7" fill="#FF806B"/>
+  <desc id="desc">An open context glyph containing three selected code-context bars.</desc>
+  <defs>
+    <linearGradient id="context-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3AA7FF"/>
+      <stop offset="100%" stop-color="#A462FF"/>
+    </linearGradient>
+  </defs>
+  <path d="M738 308 L456 308 L314 444 L314 700 L506 820 L758 820"
+        fill="none" stroke="#031B47" stroke-width="110"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="470" y="418" width="300" height="58" rx="18" fill="url(#context-gradient)"/>
+  <rect x="470" y="534" width="225" height="58" rx="18" fill="url(#context-gradient)"/>
+  <rect x="470" y="650" width="145" height="58" rx="18" fill="url(#context-gradient)"/>
 </svg>

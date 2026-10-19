@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420" role="img" aria-labelledby="title desc">
+  <title id="title">OpenContextEngine banner</title>
+  <desc id="desc">OCE — Open Context Engine. Open code understanding for agents.</desc>
+  <defs>
+    <linearGradient id="context-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3AA7FF"/>
+      <stop offset="100%" stop-color="#A462FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="420" fill="#F7F9FC"/>
+  <g transform="translate(72,46) scale(0.30)">
+    <path d="M738 308 L456 308 L314 444 L314 700 L506 820 L758 820"
+          fill="none" stroke="#031B47" stroke-width="110"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="470" y="418" width="300" height="58" rx="18" fill="url(#context-gradient)"/>
+    <rect x="470" y="534" width="225" height="58" rx="18" fill="url(#context-gradient)"/>
+    <rect x="470" y="650" width="145" height="58" rx="18" fill="url(#context-gradient)"/>
+  </g>
+  <g transform="translate(440,94)">
+    <text x="0" y="72" font-family="Inter, Arial, Helvetica, sans-serif" font-size="92" font-weight="800" fill="#10203D" letter-spacing="2">OCE</text>
+    <text x="0" y="128" font-family="Inter, Arial, Helvetica, sans-serif" font-size="33" font-weight="500" fill="#72809A" letter-spacing="4">OPEN CONTEXT ENGINE</text>
+    <rect x="0" y="175" width="565" height="4" rx="2" fill="#E7ECF5"/>
+    <text x="0" y="234" font-family="Inter, Arial, Helvetica, sans-serif" font-size="40" font-weight="700" fill="#10203D">Open code understanding for agents</text>
+    <text x="0" y="290" font-family="Inter, Arial, Helvetica, sans-serif" font-size="21" font-weight="500" fill="#72809A" letter-spacing="0.5">Context retrieval · structure-aware selection · open source</text>
+  </g>
+</svg>

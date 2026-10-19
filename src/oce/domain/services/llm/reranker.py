@@ -72,14 +72,10 @@ class LLMReranker:
             order = await self._llm_rerank(query, candidates_subset, top_k)
             reranked_results = [candidates_subset[i] for i in order]
 
-            # LLM 返回不足时按原始顺序补齐，保证下游拿到足够候选
-            if len(reranked_results) < top_k:
-                chosen = set(order)
-                remaining = [
-                    c for i, c in enumerate(candidates_subset) if i not in chosen
-                ]
-                reranked_results.extend(remaining[: top_k - len(reranked_results)])
-
+            # 不补齐：LLM 判定为不相关而丢弃的候选，不再按向量顺序塞回结果。
+            # 补齐会撤销重排的过滤决定，把"语义相近但答非所问"的条目重新混进来
+            # （例如问 WebSocket 时补回连接池代码）。需要更多结果请调高 top_k
+            # 或放宽召回，不要在这里兜底。
             return reranked_results[:top_k]
 
         except Exception as e:

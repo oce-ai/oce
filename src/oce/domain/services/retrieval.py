@@ -551,6 +551,13 @@ class RetrievalPipeline:
         """逐条按有效分（score × penalty）剔除低于门槛的弱匹配"""
         factor = priority_factor or self.priority_factor
         floor = self.settings.confidence_floor
+        # logger.info(
+        #     "Confidence floor={} hits={} scores={} filtered_scores={}",
+        #     floor,
+        #     len(hits),
+        #     [round(h.score * factor(h.path), 4) for h in hits],
+        #     [round(h.score * factor(h.path), 4) for h in hits if h.score * factor(h.path) >= floor]
+        # )
         return [h for h in hits if h.score * factor(h.path) >= floor]
 
 
